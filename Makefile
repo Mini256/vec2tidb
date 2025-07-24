@@ -65,7 +65,7 @@ test-local-migration: ## Test migration with local databases (requires start-dbs
 	    --tidb-database-url "mysql+pymysql://root@localhost:4000/test" \
 	    --mode create
 
-test-benchmark: ## Test benchmark with local databases (requires start-dbs first)
+benchmark: ## Test benchmark with local databases (requires start-dbs first)
 	@uv run vec2tidb qdrant benchmark \
 		--qdrant-api-url http://localhost:6333 \
 		--qdrant-collection-name benchmark_$(shell date +%s) \
@@ -73,4 +73,4 @@ test-benchmark: ## Test benchmark with local databases (requires start-dbs first
 		--workers 1,2,4,8 \
 		--batch-sizes 100,500,1000 \
 		--table-prefix benchmark_$(shell date +%s) \
-		--dataset midlib
+		--dataset qdrant-web-site-docs-2024
