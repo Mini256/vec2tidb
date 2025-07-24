@@ -74,7 +74,3 @@ test-benchmark: ## Test benchmark with local databases (requires start-dbs first
 		--batch-sizes 100,200,400 \
 		--table-prefix vec2tidb_test \
 		--cleanup-tables
-
-
-
-	

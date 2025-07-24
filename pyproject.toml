@@ -39,6 +39,14 @@ vec2tidb = "vec2tidb.cli:cli"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build]
+exclude = [
+    "/.*",
+    "/docs",
+    "/tests",
+    'DEVELOPMENT.md'
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/vec2tidb"]
 
