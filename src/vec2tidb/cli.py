@@ -2,6 +2,7 @@
 
 import click
 from typing import Optional
+from dotenv import load_dotenv
 
 from vec2tidb.commands.qdrant import (
     migrate as qdrant_migrate_impl,
@@ -9,6 +10,9 @@ from vec2tidb.commands.qdrant import (
     benchmark as qdrant_benchmark_impl,
     get_snapshot_uri,
 )
+
+
+load_dotenv()
 
 
 @click.group()

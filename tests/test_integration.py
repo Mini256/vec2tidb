@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from click.testing import CliRunner, Result
 from vec2tidb.cli import cli
 from vec2tidb.commands.qdrant import get_snapshot_uri
-from tests.utils import generate_unique_name, check_qdrant_available, check_tidb_available, QDRANT_API_URL, TIDB_DATABASE_URL
+from tests.utils import generate_unique_name
 
 
 def run_cli_command(args: list[str]) -> Result:
@@ -22,9 +22,7 @@ def run_cli_command(args: list[str]) -> Result:
     return runner.invoke(cli, args, catch_exceptions=False)
 
 
-@pytest.fixture(scope="session")
-def qdrant_client():
-    return QdrantClient(url=QDRANT_API_URL)
+# Qdrant client fixture is now in conftest.py
 
 
 @pytest.fixture(scope="session")
@@ -64,18 +62,19 @@ def sample_collection(qdrant_client, sample_collection_name) -> Generator[Collec
         pytest.skip(f"Qdrant sample collection setup failed: {e}")
 
 
-@pytest.fixture(scope="session")
-def tidb_engine():
-    return create_engine(TIDB_DATABASE_URL)
+# TiDB engine fixture is now in conftest.py
 
 
-@pytest.mark.skipif(not check_qdrant_available(), reason="Qdrant not available")
-@pytest.mark.skipif(not check_tidb_available(), reason="TiDB not available")
 def test_qdrant_migration_create_mode(
+    qdrant_available,
+    tidb_available,
     qdrant_client: QdrantClient,
     sample_collection_name: str,
     sample_collection: CollectionInfo,
     tidb_engine: Engine,
+    qdrant_api_url: str,
+    qdrant_api_key: str,
+    tidb_database_url: str,
 ):
     """Test CLI migration in create mode."""
 
@@ -97,14 +96,19 @@ def test_qdrant_migration_create_mode(
         pytest.fail(f"Collection '{collection_name}' does not exist before CLI execution")
     print(f"✅ Verified collection '{collection_name}' exists before CLI execution")
 
-    run_cli_command([
+    # Prepare CLI command arguments
+    cli_args = [
         "qdrant",
         "migrate",
-        "--qdrant-api-url", QDRANT_API_URL,
+        "--qdrant-api-url", qdrant_api_url,
         "--qdrant-collection-name", collection_name,
-        "--tidb-database-url", TIDB_DATABASE_URL,
+        "--tidb-database-url", tidb_database_url,
         "--mode", "create"
-    ])
+    ]
+    if qdrant_api_key:
+        cli_args.extend(["--qdrant-api-key", qdrant_api_key])
+    
+    run_cli_command(cli_args)
     
     # Check table exists and has VECTOR column.
     with Session(tidb_engine) as session:
@@ -193,14 +197,17 @@ def sample_table(
         session.commit()
 
 
-@pytest.mark.skipif(not check_qdrant_available(), reason="Qdrant not available")
-@pytest.mark.skipif(not check_tidb_available(), reason="TiDB not available")
 def test_qdrant_migration_update_mode(
+    qdrant_available,
+    tidb_available,
     qdrant_client: QdrantClient,
     sample_collection_name: str,
     sample_collection: CollectionInfo,
     tidb_engine: Engine,
     sample_table: str,
+    qdrant_api_url: str,
+    qdrant_api_key: str,
+    tidb_database_url: str,
 ):
     """Test CLI migration in update mode."""
 
@@ -219,18 +226,22 @@ def test_qdrant_migration_update_mode(
 
     # Now run CLI migration in update mode
     print(f"🚀 Testing CLI migration in update mode...")
-    run_cli_command([
+    cli_args = [
         "qdrant",
         "migrate",
-        "--qdrant-api-url", QDRANT_API_URL,
+        "--qdrant-api-url", qdrant_api_url,
         "--qdrant-collection-name", collection_name,
-        "--tidb-database-url", TIDB_DATABASE_URL,
+        "--tidb-database-url", tidb_database_url,
         "--table-name", table_name,
         "--id-column", "id",
         "--vector-column", "vector",
         "--payload-column", "payload",
         "--mode", "update",
-    ])
+    ]
+    if qdrant_api_key:
+        cli_args.extend(["--qdrant-api-key", qdrant_api_key])
+    
+    run_cli_command(cli_args)
 
     # Check table exists and has all records
     with Session(tidb_engine) as session:
@@ -278,8 +289,12 @@ def test_qdrant_migration_update_mode(
         session.commit()
 
 
-@pytest.mark.skipif(not check_qdrant_available(), reason="Qdrant not available")
-def test_qdrant_load_sample_command(qdrant_client: QdrantClient):
+def test_qdrant_load_sample_command(
+    qdrant_available,
+    qdrant_client: QdrantClient,
+    qdrant_api_url: str,
+    qdrant_api_key: str,
+):
     """Test CLI load-sample command."""
     collection_name = generate_unique_name("sample_test")
     
@@ -288,21 +303,36 @@ def test_qdrant_load_sample_command(qdrant_client: QdrantClient):
     
     try:
         # Run load-sample command
-        result = run_cli_command([
+        cli_args = [
             "qdrant",
             "load-sample",
-            "--qdrant-api-url", QDRANT_API_URL,
+            "--qdrant-api-url", qdrant_api_url,
             "--qdrant-collection-name", collection_name,
             "--dataset", "midlib"
-        ])
+        ]
+        if qdrant_api_key:
+            cli_args.extend(["--qdrant-api-key", qdrant_api_key])
+            
+        result = run_cli_command(cli_args)
         
         assert result.exit_code == 0, f"Load-sample command should succeed: {result.stdout}"
         
-        # Wait a bit for the snapshot recovery to complete
-        time.sleep(10)
+        # Wait for the snapshot recovery to complete (can take longer for cloud instances)
+        print("⏳ Waiting for snapshot recovery to complete...")
+        max_wait_time = 60  # Wait up to 60 seconds
+        check_interval = 5  # Check every 5 seconds
+        waited = 0
+        
+        while waited < max_wait_time:
+            if qdrant_client.collection_exists(collection_name=collection_name):
+                print(f"✅ Collection '{collection_name}' is now available (waited {waited}s)")
+                break
+            time.sleep(check_interval)
+            waited += check_interval
+            print(f"   Still waiting... ({waited}s/{max_wait_time}s)")
         
         # Verify collection was created
-        assert qdrant_client.collection_exists(collection_name=collection_name), "Collection should exist after load-sample"
+        assert qdrant_client.collection_exists(collection_name=collection_name), f"Collection should exist after load-sample (waited {waited}s)"
         
         # Verify collection has data
         count = qdrant_client.count(collection_name=collection_name).count
@@ -316,12 +346,15 @@ def test_qdrant_load_sample_command(qdrant_client: QdrantClient):
             qdrant_client.delete_collection(collection_name=collection_name)
 
 
-@pytest.mark.skipif(not check_qdrant_available(), reason="Qdrant not available")
-@pytest.mark.skipif(not check_tidb_available(), reason="TiDB not available")
 def test_qdrant_migration_with_drop_table(
+    qdrant_available,
+    tidb_available,
     sample_collection_name: str,
     sample_collection: CollectionInfo,
     tidb_engine: Engine,
+    qdrant_api_url: str,
+    qdrant_api_key: str,
+    tidb_database_url: str,
 ):
     """Test CLI migration with drop-table flag."""
     collection_name = sample_collection_name
@@ -341,16 +374,20 @@ def test_qdrant_migration_with_drop_table(
         session.commit()
     
     # Run migration with drop-table flag
-    result = run_cli_command([
+    cli_args = [
         "qdrant",
         "migrate",
-        "--qdrant-api-url", QDRANT_API_URL,
+        "--qdrant-api-url", qdrant_api_url,
         "--qdrant-collection-name", collection_name,
-        "--tidb-database-url", TIDB_DATABASE_URL,
+        "--tidb-database-url", tidb_database_url,
         "--table-name", table_name,
         "--mode", "create",
         "--drop-table"
-    ])
+    ]
+    if qdrant_api_key:
+        cli_args.extend(["--qdrant-api-key", qdrant_api_key])
+    
+    result = run_cli_command(cli_args)
     
     assert result.exit_code == 0, f"Migration with drop-table should succeed: {result.stdout}"
     
@@ -372,12 +409,15 @@ def test_qdrant_migration_with_drop_table(
         session.commit()
 
 
-@pytest.mark.skipif(not check_qdrant_available(), reason="Qdrant not available")
-@pytest.mark.skipif(not check_tidb_available(), reason="TiDB not available")
 def test_qdrant_benchmark_command(
+    qdrant_available,
+    tidb_available,
     sample_collection_name: str,
     sample_collection: CollectionInfo,
     tidb_engine: Engine,
+    qdrant_api_url: str,
+    qdrant_api_key: str,
+    tidb_database_url: str,
 ):
     """Test CLI benchmark command."""
     collection_name = sample_collection_name
@@ -388,16 +428,20 @@ def test_qdrant_benchmark_command(
     print(f"   Table prefix: {table_prefix}")
     
     # Run benchmark with small worker and batch size list for testing
-    result = run_cli_command([
+    cli_args = [
         "qdrant",
         "benchmark",
-        "--qdrant-api-url", QDRANT_API_URL,
+        "--qdrant-api-url", qdrant_api_url,
         "--qdrant-collection-name", collection_name,
-        "--tidb-database-url", TIDB_DATABASE_URL,
+        "--tidb-database-url", tidb_database_url,
         "--workers", "1,2",
         "--batch-sizes", "50,100",
         "--table-prefix", table_prefix
-    ])
+    ]
+    if qdrant_api_key:
+        cli_args.extend(["--qdrant-api-key", qdrant_api_key])
+    
+    result = run_cli_command(cli_args)
     
     assert result.exit_code == 0, f"Benchmark command should succeed: {result.stdout}"
     assert "BENCHMARK RESULTS" in result.stdout, "Output should contain benchmark results"
@@ -449,32 +493,46 @@ def test_cli_help_commands():
     print("✅ CLI help commands test completed!")
 
 
-def test_cli_error_handling():
+def test_cli_error_handling(
+    qdrant_available,
+    tidb_available,
+    qdrant_api_url: str,
+    qdrant_api_key: str,
+    tidb_database_url: str,
+):
     """Test CLI error handling for invalid inputs."""
     
     print(f"🚀 Testing CLI error handling...")
     
     # Test migration with non-existent collection
-    result = run_cli_command([
+    cli_args = [
         "qdrant",
         "migrate",
-        "--qdrant-api-url", QDRANT_API_URL,
+        "--qdrant-api-url", qdrant_api_url,
         "--qdrant-collection-name", "nonexistent_collection_12345",
-        "--tidb-database-url", TIDB_DATABASE_URL,
+        "--tidb-database-url", tidb_database_url,
         "--mode", "create"
-    ])
+    ]
+    if qdrant_api_key:
+        cli_args.extend(["--qdrant-api-key", qdrant_api_key])
+    
+    result = run_cli_command(cli_args)
     
     assert result.exit_code != 0, "Migration with non-existent collection should fail"
     assert "does not exist" in result.stdout, "Error message should mention collection doesn't exist"
     
     # Test load-sample with invalid dataset
-    result = run_cli_command([
+    cli_args = [
         "qdrant",
         "load-sample",
-        "--qdrant-api-url", QDRANT_API_URL,
+        "--qdrant-api-url", qdrant_api_url,
         "--qdrant-collection-name", "test_collection",
         "--dataset", "invalid_dataset_name"
-    ])
+    ]
+    if qdrant_api_key:
+        cli_args.extend(["--qdrant-api-key", qdrant_api_key])
+    
+    result = run_cli_command(cli_args)
     
     assert result.exit_code != 0, "Load-sample with invalid dataset should fail"
     assert "Invalid value for '--dataset'" in result.stdout, "Error message should mention invalid dataset"

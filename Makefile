@@ -56,28 +56,23 @@ stop-qdrant: ## Stop and remove local Qdrant instance
 	docker stop qdrant-local || true
 	docker rm qdrant-local || true
 
-test-local-sample: ## Test local Qdrant instance
+test-load-sample: ## Test load sample data
 	@uv run vec2tidb qdrant load-sample \
-		--qdrant-api-url http://localhost:6333 \
-		--qdrant-collection-name vec2tidb_local_test \
+		--qdrant-collection-name vec2tidb_test \
 		--dataset qdrant-docs
 
 test-migration: ## Test migration with local databases (requires start-dbs first)
 	@uv run vec2tidb qdrant migrate \
-		--qdrant-api-url http://localhost:6333 \
-		--qdrant-collection-name vec2tidb_local_test \
-		--tidb-database-url "mysql+pymysql://root@localhost:4000/test" \
+		--qdrant-collection-name vec2tidb_test \
 		--mode create \
 		--drop-table
 
 test-benchmark: ## Test benchmark with local databases (requires start-dbs first)
 	@uv run vec2tidb qdrant benchmark \
-		--qdrant-api-url http://localhost:6333 \
-		--qdrant-collection-name vec2tidb_local_test \
-		--tidb-database-url "mysql+pymysql://root@localhost:4000/test" \
+		--qdrant-collection-name vec2tidb_test \
 		--workers 1,2,4,8 \
 		--batch-sizes 100,200,400 \
-		--table-prefix vec2tidb_local_test \
+		--table-prefix vec2tidb_test \
 		--cleanup-tables
 
 
