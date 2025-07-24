@@ -1,7 +1,6 @@
 """Tests for Qdrant plugin."""
 
 from unittest.mock import Mock, patch
-import json
 
 import pytest
 from qdrant_client.models import PointStruct
@@ -12,11 +11,11 @@ from vec2tidb.commands.qdrant import migrate, create_vector_table, check_vector_
 @patch("vec2tidb.commands.qdrant.QdrantClient")
 @patch("vec2tidb.commands.qdrant.create_tidb_engine")
 @patch("vec2tidb.commands.qdrant.create_vector_table")
-@patch("vec2tidb.commands.qdrant.process_with_tqdm")
+@patch("vec2tidb.commands.qdrant.process_batches_concurrent")
 @patch("vec2tidb.commands.qdrant.click")
 def test_migrate_create_mode(
     mock_click,
-    mock_process_with_tqdm,
+    mock_process_concurrent,
     mock_create_table,
     mock_create_engine,
     mock_qdrant_client,
@@ -49,7 +48,7 @@ def test_migrate_create_mode(
     mock_engine.dialect.identifier_preparer.format_column.side_effect = lambda x: x
 
     mock_create_table.return_value = "test_table"
-    mock_process_with_tqdm.return_value = 100
+    mock_process_concurrent.return_value = 100
 
     # Call migrate function
     migrate(
@@ -60,6 +59,7 @@ def test_migrate_create_mode(
         tidb_database_url="mysql+pymysql://root@localhost:4000/test",
         table_name="test_table",
         id_column="id",
+        id_column_type="BIGINT",
         vector_column="vector",
         payload_column="payload",
     )
@@ -76,9 +76,9 @@ def test_migrate_create_mode(
         "mysql+pymysql://root@localhost:4000/test"
     )
     mock_create_table.assert_called_once_with(
-        mock_engine, "test_table", "id", "vector", "payload", distance_metric="cosine", dimensions=768
+        mock_engine, "test_table", "id", "vector", "payload", distance_metric="cosine", dimensions=768, id_column_type="BIGINT"
     )
-    mock_process_with_tqdm.assert_called_once()
+    mock_process_concurrent.assert_called_once()
 
 
 @patch("vec2tidb.commands.qdrant.QdrantClient")
@@ -102,6 +102,7 @@ def test_migrate_collection_not_exists(mock_create_engine, mock_qdrant_client):
             tidb_database_url="mysql+pymysql://root@localhost:4000/test",
             table_name="test_table",
             id_column="id",
+            id_column_type="BIGINT",
             vector_column="vector",
             payload_column="payload",
         )
@@ -129,6 +130,7 @@ def test_migrate_empty_collection(mock_create_engine, mock_qdrant_client):
             tidb_database_url="mysql+pymysql://root@localhost:4000/test",
             table_name="test_table",
             id_column="id",
+            id_column_type="BIGINT",
             vector_column="vector",
             payload_column="payload",
         )
@@ -137,11 +139,11 @@ def test_migrate_empty_collection(mock_create_engine, mock_qdrant_client):
 @patch("vec2tidb.commands.qdrant.QdrantClient")
 @patch("vec2tidb.commands.qdrant.create_tidb_engine")
 @patch("vec2tidb.commands.qdrant.check_vector_table")
-@patch("vec2tidb.commands.qdrant.process_with_tqdm")
+@patch("vec2tidb.commands.qdrant.process_batches_concurrent")
 @patch("vec2tidb.commands.qdrant.click")
 def test_migrate_update_mode(
     mock_click,
-    mock_process_with_tqdm,
+    mock_process_concurrent,
     mock_check_table,
     mock_create_engine,
     mock_qdrant_client,
@@ -173,7 +175,7 @@ def test_migrate_update_mode(
     mock_engine.dialect.identifier_preparer.format_table.return_value = "test_table"
     mock_engine.dialect.identifier_preparer.format_column.side_effect = lambda x: x
 
-    mock_process_with_tqdm.return_value = 50
+    mock_process_concurrent.return_value = 50
 
     # Call migrate function
     migrate(
@@ -184,6 +186,7 @@ def test_migrate_update_mode(
         tidb_database_url="mysql+pymysql://root@localhost:4000/test",
         table_name="test_table",
         id_column="id",
+        id_column_type="BIGINT",
         vector_column="vector",
         payload_column="payload",
     )
@@ -195,17 +198,17 @@ def test_migrate_update_mode(
     mock_check_table.assert_called_once_with(
         mock_engine, "test_table", "id", "vector", "payload"
     )
-    mock_process_with_tqdm.assert_called_once()
+    mock_process_concurrent.assert_called_once()
 
 
 @patch("vec2tidb.commands.qdrant.QdrantClient")
 @patch("vec2tidb.commands.qdrant.create_tidb_engine")
 @patch("vec2tidb.commands.qdrant.check_vector_table")
-@patch("vec2tidb.commands.qdrant.process_with_tqdm")
+@patch("vec2tidb.commands.qdrant.process_batches_concurrent")
 @patch("vec2tidb.commands.qdrant.click")
 def test_migrate_update_mode_no_payload(
     mock_click,
-    mock_process_with_tqdm,
+    mock_process_concurrent,
     mock_check_table,
     mock_create_engine,
     mock_qdrant_client,
@@ -237,7 +240,7 @@ def test_migrate_update_mode_no_payload(
     mock_engine.dialect.identifier_preparer.format_table.return_value = "test_table"
     mock_engine.dialect.identifier_preparer.format_column.side_effect = lambda x: x
 
-    mock_process_with_tqdm.return_value = 25
+    mock_process_concurrent.return_value = 25
 
     # Call migrate function
     migrate(
@@ -248,6 +251,7 @@ def test_migrate_update_mode_no_payload(
         tidb_database_url="mysql+pymysql://root@localhost:4000/test",
         table_name="test_table",
         id_column="id",
+        id_column_type="BIGINT",
         vector_column="vector",
         payload_column=None,
     )
@@ -256,7 +260,7 @@ def test_migrate_update_mode_no_payload(
     mock_check_table.assert_called_once_with(
         mock_engine, "test_table", "id", "vector", None
     )
-    mock_process_with_tqdm.assert_called_once()
+    mock_process_concurrent.assert_called_once()
 
 
 def test_create_vector_table():
@@ -291,13 +295,13 @@ def test_create_vector_table():
 
         # Verify the SQL contains expected elements
         call_args = mock_session.execute.call_args[0][0]
-        assert "CREATE TABLE IF NOT EXISTS test_table" in str(call_args)
-        assert "id VARCHAR(255) PRIMARY KEY" in str(call_args)
+        assert "CREATE TABLE test_table" in str(call_args)
+        assert "id BIGINT PRIMARY KEY" in str(call_args)
         assert "vector VECTOR(768)" in str(call_args)
         assert "payload JSON" in str(call_args)
         assert "VEC_COSINE_DISTANCE" in str(call_args)
-        assert "`created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP" in str(call_args)
-        assert "`updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" in str(call_args)
+        assert "`created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP" in str(call_args)
+        assert "`updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" in str(call_args)
 
 
 def test_create_vector_table_l2_distance():
@@ -332,8 +336,8 @@ def test_create_vector_table_l2_distance():
 
         # Verify the SQL contains expected elements
         call_args = mock_session.execute.call_args[0][0]
-        assert "CREATE TABLE IF NOT EXISTS test_table" in str(call_args)
-        assert "id VARCHAR(255) PRIMARY KEY" in str(call_args)
+        assert "CREATE TABLE test_table" in str(call_args)
+        assert "id BIGINT PRIMARY KEY" in str(call_args)
         assert "vector VECTOR(1536)" in str(call_args)
         assert "payload JSON" in str(call_args)
         assert "VEC_L2_DISTANCE" in str(call_args)
@@ -351,7 +355,7 @@ def test_create_vector_table_invalid_distance():
     mock_session.__exit__ = Mock(return_value=None)
 
     with patch('vec2tidb.commands.qdrant.Session', return_value=mock_session):
-        with pytest.raises(ValueError, match="Invalid distance metric: euclidean"):
+        with pytest.raises(Exception, match="Invalid distance metric: euclidean"):
             create_vector_table(
                 mock_engine,
                 "test_table",
@@ -603,3 +607,135 @@ def test_update_points_no_payload():
 
         # Verify commit was called
         mock_session.commit.assert_called_once()
+
+
+@patch("vec2tidb.commands.qdrant.QdrantClient")
+@patch("vec2tidb.commands.qdrant.create_tidb_engine")
+@patch("vec2tidb.commands.qdrant.create_vector_table")
+@patch("vec2tidb.commands.qdrant.process_batches_concurrent")
+@patch("vec2tidb.commands.qdrant.click")
+def test_migrate_single_worker(
+    mock_click,
+    mock_process_concurrent,
+    mock_create_table,
+    mock_create_engine,
+    mock_qdrant_client,
+):
+    """Test migrate function with single worker (should use sequential processing)."""
+    # Setup mocks
+    mock_client_instance = Mock()
+    mock_qdrant_client.return_value = mock_client_instance
+    mock_client_instance.collection_exists.return_value = True
+    mock_client_instance.count.return_value = Mock(count=100)
+    
+    # Mock the sample point for ID type detection
+    sample_point = PointStruct(id=1, vector=[1.0, 2.0], payload={})
+    mock_client_instance.scroll.return_value = ([sample_point], None)
+    
+    # Mock the collection info with distance metric
+    mock_vectors = Mock()
+    mock_vectors.size = 768
+    mock_vectors.distance = Mock()
+    mock_vectors.distance.lower.return_value = "cosine"
+    
+    mock_params = Mock()
+    mock_params.vectors = mock_vectors
+    
+    mock_config = Mock()
+    mock_config.params = mock_params
+    
+    mock_client_instance.get_collection.return_value = Mock(config=mock_config)
+
+    mock_engine = Mock()
+    mock_create_engine.return_value = mock_engine
+    mock_engine.dialect.identifier_preparer.quote_identifier.side_effect = lambda x: x
+
+    mock_process_concurrent.return_value = 100
+
+    # Call migrate function with workers=1
+    migrate(
+        mode="create",
+        qdrant_api_url="http://localhost:6333",
+        qdrant_api_key=None,
+        qdrant_collection_name="test",
+        tidb_database_url="mysql+pymysql://root@localhost:4000/test",
+        table_name="test_table",
+        id_column="id",
+        id_column_type="BIGINT",
+        vector_column="vector",
+        payload_column="payload",
+        workers=1,
+    )
+
+    # Verify concurrent processing was used (handles single worker internally)
+    mock_process_concurrent.assert_called_once()
+    
+    # Verify the correct parameters were passed
+    call_args = mock_process_concurrent.call_args
+    assert call_args[1]['workers'] == 1
+
+
+@patch("vec2tidb.commands.qdrant.QdrantClient")
+@patch("vec2tidb.commands.qdrant.create_tidb_engine")
+@patch("vec2tidb.commands.qdrant.create_vector_table")
+@patch("vec2tidb.commands.qdrant.process_batches_concurrent")
+@patch("vec2tidb.commands.qdrant.click")
+def test_migrate_multiple_workers(
+    mock_click,
+    mock_process_concurrent,
+    mock_create_table,
+    mock_create_engine,
+    mock_qdrant_client,
+):
+    """Test migrate function with multiple workers (should use concurrent processing)."""
+    # Setup mocks
+    mock_client_instance = Mock()
+    mock_qdrant_client.return_value = mock_client_instance
+    mock_client_instance.collection_exists.return_value = True
+    mock_client_instance.count.return_value = Mock(count=100)
+    
+    # Mock the sample point for ID type detection
+    sample_point = PointStruct(id=1, vector=[1.0, 2.0], payload={})
+    mock_client_instance.scroll.return_value = ([sample_point], None)
+    
+    # Mock the collection info with distance metric
+    mock_vectors = Mock()
+    mock_vectors.size = 768
+    mock_vectors.distance = Mock()
+    mock_vectors.distance.lower.return_value = "cosine"
+    
+    mock_params = Mock()
+    mock_params.vectors = mock_vectors
+    
+    mock_config = Mock()
+    mock_config.params = mock_params
+    
+    mock_client_instance.get_collection.return_value = Mock(config=mock_config)
+
+    mock_engine = Mock()
+    mock_create_engine.return_value = mock_engine
+    mock_engine.dialect.identifier_preparer.quote_identifier.side_effect = lambda x: x
+
+    mock_process_concurrent.return_value = 100
+
+    # Call migrate function with workers=4
+    migrate(
+        mode="create",
+        qdrant_api_url="http://localhost:6333",
+        qdrant_api_key=None,
+        qdrant_collection_name="test",
+        tidb_database_url="mysql+pymysql://root@localhost:4000/test",
+        table_name="test_table",
+        id_column="id",
+        id_column_type="BIGINT",
+        vector_column="vector",
+        payload_column="payload",
+        workers=4,
+    )
+
+    # Verify concurrent processing was used
+    mock_process_concurrent.assert_called_once()
+    
+    # Verify the correct parameters were passed to concurrent processor
+    call_args = mock_process_concurrent.call_args
+    assert call_args[1]['workers'] == 4

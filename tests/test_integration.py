@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from click.testing import CliRunner, Result
 from vec2tidb.cli import cli
+from vec2tidb.commands.qdrant import get_snapshot_uri
 from tests.utils import generate_unique_name, check_qdrant_available, check_tidb_available, QDRANT_API_URL, TIDB_DATABASE_URL
 
 
@@ -38,9 +39,10 @@ def sample_collection(qdrant_client, sample_collection_name) -> Generator[Collec
     try:
         # Recover from snapshot - this will automatically create the collection
         print(f"📝 Recovering collection '{collection_name}' from snapshot...")
+        midlib_snapshot_uri = get_snapshot_uri(dataset="midlib")
         qdrant_client.recover_snapshot(
             collection_name=collection_name,
-            location="https://snapshots.qdrant.io/midlib.snapshot"
+            location=midlib_snapshot_uri
         )
         print(f"✅ Created collection '{collection_name}' and recovered sample data from snapshot")
 

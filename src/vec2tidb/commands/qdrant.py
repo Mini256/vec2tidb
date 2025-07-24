@@ -2,14 +2,46 @@ from typing import Optional
 
 import click
 import json
+import subprocess
+import sys
+import time
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct
 from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session
 
-from vec2tidb.common import process_with_tqdm
+from vec2tidb.processing import process_batches_concurrent
 from vec2tidb.tidb import create_tidb_engine
 
+
+def get_snapshot_uri(dataset: Optional[str] = None, snapshot_uri: Optional[str] = None) -> Optional[str]:
+    """
+    Get snapshot URI from dataset name or return custom snapshot URI.
+    
+    Args:
+        dataset: Dataset name to get predefined snapshot URI
+        snapshot_uri: Custom snapshot URI (takes precedence over dataset)
+        
+    Returns:
+        Resolved snapshot URI or None if neither provided
+        
+    Raises:
+        click.UsageError: If dataset is provided but invalid
+    """
+    if snapshot_uri:
+        return snapshot_uri
+    elif dataset:
+        dataset_snapshots = {
+            "midlib": "https://snapshots.qdrant.io/midlib.snapshot",
+            "qdrant-web-site-docs-2024": "https://snapshots.qdrant.io/qdrant-web-site-docs-2024-04-05.snapshot",
+            "prefix-cache": "https://snapshots.qdrant.io/prefix-cache.snapshot",
+        }
+        resolved_uri = dataset_snapshots.get(dataset)
+        if not resolved_uri:
+            raise click.UsageError(f"Invalid dataset: {dataset}")
+        return resolved_uri
+    else:
+        return None
 
 
 def migrate(
@@ -24,6 +56,7 @@ def migrate(
     vector_column: str,
     payload_column: str,
     batch_size: int = 100,
+    workers: int = 1,
     drop_table: bool = False,
 ):
     """Migrate vector data from a Qdrant collection to a TiDB table."""
@@ -77,6 +110,11 @@ def migrate(
         f"  - ID Column      : {id_column} ({id_column_type})",
         f"  - Vector Column  : {vector_column}",
         f"  - Payload Column : {payload_column}",
+        "",
+        "Migration settings:",
+        f"  - Mode           : {mode}",
+        f"  - Batch Size     : {batch_size}",
+        f"  - Workers        : {workers}",
         "=" * 64,
         "",
     ]
@@ -117,39 +155,60 @@ def migrate(
     # Migrate data with progress tracking
     click.echo("⏳ Starting data migration...\n")
 
-    # Track pagination state
-    current_offset = None
+    def batch_generator(batch_size):
+        """Generate batches of vectors from Qdrant."""
+        current_offset = None
+        while True:
+            points, next_page_offset = qdrant_client.scroll(
+                collection_name=qdrant_collection_name,
+                limit=batch_size,
+                offset=current_offset,
+                with_payload=True,
+                with_vectors=True,
+            )
 
-    def batch_processor(batch_size=batch_size, **kwargs):
-        """Process a batch of vectors from Qdrant."""
-        nonlocal current_offset
+            if not points:
+                break
 
-        points, next_page_offset = qdrant_client.scroll(
-            collection_name=qdrant_collection_name,
-            limit=batch_size,
-            offset=current_offset,
-            with_payload=True,
-            with_vectors=True,
-        )
+            yield points
+            current_offset = next_page_offset
 
+            if next_page_offset is None:
+                break
+
+    def batch_processor(points):
+        """Process a batch of vectors and insert into TiDB."""
         if not points:
-            return 0, False
+            return 0
 
-        # Update offset for next iteration
-        current_offset = next_page_offset
+        # For single worker, reuse the main engine; for multiple workers, create new engine for thread safety
+        if workers == 1:
+            worker_db_engine = db_engine
+            cleanup_engine = False
+        else:
+            worker_db_engine = create_tidb_engine(tidb_database_url)
+            cleanup_engine = True
 
-        # Insert/update records in TiDB
-        if mode == "create":
-            insert_points(db_engine, points, table_name, id_column, vector_column, payload_column)
-        elif mode == "update":
-            update_points(db_engine, points, table_name, id_column, vector_column, payload_column)
+        try:
+            # Insert/update records in TiDB
+            if mode == "create":
+                insert_points(worker_db_engine, points, table_name, id_column, vector_column, payload_column)
+            elif mode == "update":
+                update_points(worker_db_engine, points, table_name, id_column, vector_column, payload_column)
 
-        has_more = next_page_offset is not None
-        return len(points), has_more
+            return len(points)
+        finally:
+            # Clean up the worker engine only if it was created for this worker
+            if cleanup_engine:
+                worker_db_engine.dispose()
 
-    # Use the progress tracking utility
-    processed_total = process_with_tqdm(
-        tasks_total=vector_total, batch_processor=batch_processor, batch_size=batch_size
+    # Use unified concurrent processing (handles both single and multiple workers)
+    processed_total = process_batches_concurrent(
+        tasks_total=vector_total,
+        batch_generator=batch_generator,
+        batch_processor=batch_processor,
+        workers=workers,
+        batch_size=batch_size,
     )
 
     click.echo()
@@ -318,17 +377,169 @@ def update_points(
         session.commit()
 
 
-def load_sample(
-    qdrant_api_url: str,
-    qdrant_api_key: Optional[str],
+def _load_sample_data(
+    qdrant_client: QdrantClient,
     qdrant_collection_name: str,
     snapshot_uri: str,
 ):
-    qdrant_client = QdrantClient(url=qdrant_api_url, api_key=qdrant_api_key)
-
+    """Internal helper function to load sample data from a snapshot."""
     click.echo(f"⏳ Loading sample collection from {snapshot_uri}...")
     qdrant_client.recover_snapshot(
         collection_name=qdrant_collection_name,
         location=snapshot_uri
     )
     click.echo(f"✅ Loaded sample collection from {snapshot_uri}")
+
+
+def load_sample(
+    qdrant_api_url: str,
+    qdrant_api_key: Optional[str],
+    qdrant_collection_name: str,
+    snapshot_uri: str,
+):
+    """Load a sample collection from a Qdrant snapshot."""
+    qdrant_client = QdrantClient(url=qdrant_api_url, api_key=qdrant_api_key)
+    _load_sample_data(qdrant_client, qdrant_collection_name, snapshot_uri)
+
+
+def benchmark(
+    qdrant_api_url: str,
+    qdrant_api_key: Optional[str],
+    qdrant_collection_name: str,
+    tidb_database_url: str,
+    worker_list: list[int],
+    batch_size_list: list[int],
+    table_prefix: str = "benchmark_test",
+    snapshot_uri: Optional[str] = None,
+):
+    """Run performance benchmarks with different worker and batch size configurations."""
+    
+    # Initialize Qdrant client
+    qdrant_client = QdrantClient(url=qdrant_api_url, api_key=qdrant_api_key)
+    
+    # Handle data loading based on whether snapshot_uri is provided
+    if snapshot_uri:
+        # If snapshot_uri is provided, load sample data directly
+        click.echo(f"📦 Loading sample data from snapshot for collection '{qdrant_collection_name}'...")
+        _load_sample_data(qdrant_client, qdrant_collection_name, snapshot_uri)
+        
+        # Verify data was loaded successfully
+        if not qdrant_client.collection_exists(collection_name=qdrant_collection_name):
+            raise click.UsageError(f"Failed to load sample data for collection '{qdrant_collection_name}'")
+        
+        vector_count = qdrant_client.count(collection_name=qdrant_collection_name).count
+        if vector_count == 0:
+            raise click.UsageError(f"Failed to load sample data - collection '{qdrant_collection_name}' is still empty")
+    else:
+        # If no snapshot_uri, check existing collection
+        if not qdrant_client.collection_exists(collection_name=qdrant_collection_name):
+            raise click.UsageError(
+                f"Requested Qdrant collection '{qdrant_collection_name}' does not exist. "
+                f"Use --dataset=midlib to auto-load sample data."
+            )
+        
+        vector_count = qdrant_client.count(collection_name=qdrant_collection_name).count
+        if vector_count == 0:
+            raise click.UsageError(
+                f"Collection '{qdrant_collection_name}' exists but is empty. "
+                f"Use --dataset=midlib to auto-load sample data."
+            )
+    
+    # Get collection info
+    collection_info = qdrant_client.get_collection(collection_name=qdrant_collection_name)
+    vector_dimension = collection_info.config.params.vectors.size
+    distance_metric = collection_info.config.params.vectors.distance.lower()
+    
+    click.echo("🚀 Starting vec2tidb concurrent migration benchmark")
+    click.echo("=" * 60)
+    click.echo(f"Collection: {qdrant_collection_name}")
+    click.echo(f"Vectors: {vector_count}")
+    click.echo(f"Dimensions: {vector_dimension}")
+    click.echo(f"Distance: {distance_metric}")
+    click.echo("=" * 60)
+    
+    # Generate test configurations
+    test_configs = []
+    for workers in worker_list:
+        for batch_size in batch_size_list:
+            test_configs.append((workers, batch_size))
+    
+    results = []
+    
+    # Run benchmark tests
+    for i, (workers, batch_size) in enumerate(test_configs):
+        table_suffix = f"{workers}w_{batch_size}b"
+        table_name = f"{table_prefix}_{table_suffix}"
+        
+        click.echo(f"Testing workers={workers}, batch_size={batch_size}...")
+        
+        # Build command
+        cmd = [
+            sys.executable, "-m", "vec2tidb.cli", "qdrant", "migrate",
+            "--qdrant-api-url", qdrant_api_url,
+            "--qdrant-collection-name", qdrant_collection_name,
+            "--tidb-database-url", tidb_database_url,
+            "--table-name", table_name,
+            "--workers", str(workers),
+            "--batch-size", str(batch_size),
+            "--drop-table"
+        ]
+        
+        if qdrant_api_key:
+            cmd.extend(["--qdrant-api-key", qdrant_api_key])
+        
+        # Run test
+        start_time = time.time()
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            end_time = time.time()
+            execution_time = end_time - start_time
+            click.echo(f"✅ Completed in {execution_time:.2f}s")
+            results.append((workers, batch_size, execution_time))
+        except subprocess.CalledProcessError as e:
+            click.echo(f"❌ Error: {e}")
+            click.echo(f"stderr: {e.stderr}")
+            results.append((workers, batch_size, float('inf')))
+        
+        # Wait between tests (except for the last one)
+        if i < len(test_configs) - 1:
+            click.echo("Waiting 2 seconds before next test...")
+            time.sleep(2)
+    
+    # Print results summary
+    click.echo("\n" + "=" * 60)
+    click.echo("📊 BENCHMARK RESULTS")
+    click.echo("=" * 60)
+    click.echo(f"{'Workers':<8} {'Batch Size':<12} {'Time (s)':<10} {'Performance':<12}")
+    click.echo("-" * 60)
+    
+    valid_times = [result[2] for result in results if result[2] != float('inf')]
+    best_time = min(valid_times) if valid_times else float('inf')
+    
+    for workers, batch_size, execution_time in results:
+        if execution_time == float('inf'):
+            performance = "FAILED"
+            time_str = "FAILED"
+        else:
+            speedup = best_time / execution_time
+            if speedup >= 1.0:
+                performance = f"{speedup:.2f}x"
+            else:
+                performance = f"{1/speedup:.2f}x slower"
+            time_str = f"{execution_time:.2f}"
+        
+        click.echo(f"{workers:<8} {batch_size:<12} {time_str:<10} {performance:<12}")
+    
+    click.echo("\n💡 Recommendations:")
+    if results:
+        # Find best configuration
+        valid_results = [(w, b, t) for w, b, t in results if t != float('inf')]
+        if valid_results:
+            best_workers, best_batch, best_time = min(valid_results, key=lambda x: x[2])
+            click.echo(f"   • Best performance: {best_workers} workers, batch size {best_batch}")
+            click.echo(f"   • Completed in {best_time:.2f} seconds")
+        else:
+            click.echo("   • All tests failed. Check your database connections.")
+    
+    click.echo(f"   • For production use, consider your system's CPU cores and memory")
+    click.echo(f"   • Monitor database connection limits when using many workers")
