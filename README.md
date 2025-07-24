@@ -12,7 +12,7 @@ A CLI tool for migrating vector data from vector databases to TiDB.
 ```
 
 
-## Why migrate vector database to TiDB?
+## Why migrate from vector database to TiDB?
 
 TiDB is an open-source, distributed SQL database for modern AI applications:
 
@@ -47,7 +47,7 @@ vec2tidb qdrant --help
 
 To migrate vectors from Qdrant collection to a new TiDB table, use `create` mode.
 
-```bash 
+```bash
 vec2tidb qdrant migrate \
   --qdrant-api-url http://localhost:6333 \
   --qdrant-collection-name test_collection \
