@@ -16,10 +16,10 @@ A CLI tool for migrating vector data from vector databases to TiDB.
 
 TiDB is an open-source, distributed SQL database for modern AI applications:
 
-🗄️ **Unified storage**: Store vector embeddings, documents, knowledge graphs, and operational data in a single database to reduce maintenance overhead.
-🔍 **Native SQL support**: Run complex queries with full SQL capabilities, including joins, subqueries, aggregations, and advanced analytics.
-📈 **Effortless scalability**: Scale out horizontally with ease to handle dynamic and growing workloads.
-🔒 **Strong consistency**: Ensure data integrity and reliability with ACID transactions and strong consistency guarantees.
+- 🗄️ **Unified storage**: Store vector embeddings, documents, knowledge graphs, and operational data in a single database to reduce maintenance overhead.
+- 🔍 **Native SQL support**: Run complex queries with full SQL capabilities, including joins, subqueries, aggregations, and advanced analytics.
+- 📈 **Effortless scalability**: Scale out horizontally with ease to handle dynamic and growing workloads.
+- 🔒 **Strong consistency**: Ensure data integrity and reliability with ACID transactions and strong consistency guarantees.
 
 ## Installation
 
@@ -79,8 +79,11 @@ vec2tidb qdrant migrate \
 | `--tidb-database-url`      | TiDB connection string (Default: `mysql+pymysql://root:@localhost:4000/test`)                    |
 | `--table-name`             | Target TiDB table name. Required in update mode; defaults to collection name in create mode.     |
 | `--id-column`              | ID column name in TiDB table (Required in update mode, default is `id` in create mode)           |
+| `--id-column-type`         | ID column type in TiDB table (Default: `BIGINT`)                                                 |
 | `--vector-column`          | Vector column name in TiDB table (Required in update mode, default is `vector` in create mode)   |
 | `--payload-column`         | Payload column name in TiDB table (Optional in update mode, default is `payload` in create mode) |
+| `--batch-size`             | Batch size for migration (Default: `100`)                                                        |
+| `--drop-table`             | Drop the target table if it exists.                                                              |
 
 **Environment Variables:**
 
