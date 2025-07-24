@@ -65,7 +65,10 @@ test-migration: ## Test migration with local databases (requires start-dbs first
 	@uv run vec2tidb qdrant migrate \
 		--qdrant-collection-name vec2tidb_test \
 		--mode create \
+		--workers 16 \
+		--batch-size 800 \
 		--drop-table
+
 
 test-benchmark: ## Test benchmark with local databases (requires start-dbs first)
 	@uv run vec2tidb qdrant benchmark \

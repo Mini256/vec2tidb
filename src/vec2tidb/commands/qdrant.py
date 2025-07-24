@@ -139,6 +139,8 @@ def migrate(
                 drop_vector_table(db_engine, table_name)
                 click.echo(f"✅ Dropped existing TiDB table: {table_name}")
 
+            click.echo(f"⏳ Creating new TiDB table: {table_name}")
+            start_time = time.time()
             create_vector_table(
                 db_engine,
                 table_name,
@@ -149,7 +151,7 @@ def migrate(
                 dimensions=vector_dimension,
                 id_column_type=id_column_type,
             )
-            click.echo(f"✅ Created new TiDB table: {table_name}")
+            click.echo(f"✅ Created new TiDB table: {table_name} (cost time: {time.time() - start_time:.2f}s)")
         except Exception as e:
             raise click.ClickException(f"Failed to create table: {e}")
     elif mode == "update":
