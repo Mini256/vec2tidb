@@ -13,7 +13,7 @@ A CLI tool for migrating vector data from vector databases to TiDB.
 
 Supported vector databases:
 
-- [Qdrant](https://qdrant.tech/)
+- Qdrant
 
 
 ## Why migrate from vector database to TiDB?
