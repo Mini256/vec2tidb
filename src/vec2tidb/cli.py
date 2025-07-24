@@ -160,11 +160,11 @@ def qdrant_migrate(
             payload_column = "payload"
     elif mode == "update":
         if not table_name:
-            raise ValueError("Option --table-name is required for update mode")
+            raise click.UsageError("Option --table-name is required for update mode")
         if not id_column:
-            raise ValueError("Option --id-column is required for update mode")
+            raise click.UsageError("Option --id-column is required for update mode")
         if not vector_column:
-            raise ValueError("Option --vector-column is required for update mode")
+            raise click.UsageError("Option --vector-column is required for update mode")
 
     qdrant_migrate_impl(
         mode=mode,
