@@ -14,17 +14,19 @@ from vec2tidb.processing import process_batches_concurrent
 from vec2tidb.tidb import create_tidb_engine
 
 
-def get_snapshot_uri(dataset: Optional[str] = None, snapshot_uri: Optional[str] = None) -> Optional[str]:
+def get_snapshot_uri(
+    dataset: Optional[str] = None, snapshot_uri: Optional[str] = None
+) -> Optional[str]:
     """
     Get snapshot URI from dataset name or return custom snapshot URI.
-    
+
     Args:
         dataset: Dataset name to get predefined snapshot URI
         snapshot_uri: Custom snapshot URI (takes precedence over dataset)
-        
+
     Returns:
         Resolved snapshot URI or None if neither provided
-        
+
     Raises:
         click.UsageError: If dataset is provided but invalid
     """
@@ -33,7 +35,7 @@ def get_snapshot_uri(dataset: Optional[str] = None, snapshot_uri: Optional[str] 
     elif dataset:
         dataset_snapshots = {
             "midlib": "https://snapshots.qdrant.io/midlib.snapshot",
-            "qdrant-web-site-docs-2024": "https://snapshots.qdrant.io/qdrant-web-site-docs-2024-04-05.snapshot",
+            "qdrant-docs": "https://snapshots.qdrant.io/qdrant-docs-04-05.snapshot",
             "prefix-cache": "https://snapshots.qdrant.io/prefix-cache.snapshot",
         }
         resolved_uri = dataset_snapshots.get(dataset)
@@ -74,10 +76,12 @@ def migrate(
         raise click.UsageError(
             f"No records present in requested Qdrant collection '{qdrant_collection_name}'"
         )
-    
+
     # Determine the type of point IDs in the Qdrant collection by fetching the first point
     id_column_type = "BIGINT"
-    sample_points = qdrant_client.scroll(collection_name=qdrant_collection_name, limit=1)
+    sample_points = qdrant_client.scroll(
+        collection_name=qdrant_collection_name, limit=1
+    )
     if sample_points and sample_points[0]:
         sample_point = sample_points[0][0]
         if isinstance(sample_point.id, int):
@@ -86,7 +90,9 @@ def migrate(
             id_length = len(sample_point.id)
             id_column_type = f"VARCHAR({id_length})"
         else:
-            raise click.BadParameter(f"Unsupported Qdrant point ID type: {type(sample_point.id)}")
+            raise click.BadParameter(
+                f"Unsupported Qdrant point ID type: {type(sample_point.id)}"
+            )
 
     # Get collection info to determine vector dimension
     collection_info = qdrant_client.get_collection(
@@ -96,26 +102,27 @@ def migrate(
     vector_distance_metric = collection_info.config.params.vectors.distance.lower()
 
     migration_summary = [
-        "=" * 64,
-        "Source database: Qdrant",
-        "Source collection:",
-        f"  - Name           : {qdrant_collection_name}",
-        f"  - Vector Count   : {vector_total}",
-        f"  - Dimension      : {vector_dimension}",
-        f"  - Distance Metric: {vector_distance_metric}",
+        "=" * 80,
+        "🚚 MIGRATION SUMMARY",
+        "=" * 80,
+        f"{'Property':<20} {'Value':<30} {'Details':<25}",
+        "-" * 80,
+        f"{'Source Database':<20} {'Qdrant':<30} {'vector database':<25}",
+        f"{'Source Collection':<20} {qdrant_collection_name:<30} {'source data':<25}",
+        f"{'Vector Count':<20} {str(vector_total):<30} {'records':<25}",
+        f"{'Dimension':<20} {str(vector_dimension):<30} {'features':<25}",
+        f"{'Distance Metric':<20} {vector_distance_metric:<30} {'similarity function':<25}",
         "",
-        "Target database: TiDB",
-        "Target table:",
-        f"  - Name           : {table_name}",
-        f"  - ID Column      : {id_column} ({id_column_type})",
-        f"  - Vector Column  : {vector_column}",
-        f"  - Payload Column : {payload_column}",
+        f"{'Target Database':<20} {'TiDB':<30} {'relational database':<25}",
+        f"{'Target Table':<20} {table_name:<30} {'destination table':<25}",
+        f"{'ID Column':<20} {id_column:<30} {f'({id_column_type})':<25}",
+        f"{'Vector Column':<20} {vector_column:<30} {'VECTOR type':<25}",
+        f"{'Payload Column':<20} {payload_column or 'None':<30} {'JSON type':<25}",
         "",
-        "Migration settings:",
-        f"  - Mode           : {mode}",
-        f"  - Batch Size     : {batch_size}",
-        f"  - Workers        : {workers}",
-        "=" * 64,
+        f"{'Mode':<20} {mode:<30} {'operation type':<25}",
+        f"{'Batch Size':<20} {str(batch_size):<30} {'records per batch':<25}",
+        f"{'Workers':<20} {str(workers):<30} {'concurrent threads':<25}",
+        "=" * 80,
         "",
     ]
     for line in migration_summary:
@@ -147,7 +154,9 @@ def migrate(
             raise click.ClickException(f"Failed to create table: {e}")
     elif mode == "update":
         try:
-            check_vector_table(db_engine, table_name, id_column, vector_column, payload_column)
+            check_vector_table(
+                db_engine, table_name, id_column, vector_column, payload_column
+            )
             click.echo(f"✅ Verified the existing TiDB table: {table_name}")
         except Exception as e:
             raise click.ClickException(f"Failed to check table: {e}")
@@ -192,9 +201,23 @@ def migrate(
         try:
             # Insert/update records in TiDB
             if mode == "create":
-                insert_points(worker_db_engine, points, table_name, id_column, vector_column, payload_column)
+                insert_points(
+                    worker_db_engine,
+                    points,
+                    table_name,
+                    id_column,
+                    vector_column,
+                    payload_column,
+                )
             elif mode == "update":
-                update_points(worker_db_engine, points, table_name, id_column, vector_column, payload_column)
+                update_points(
+                    worker_db_engine,
+                    points,
+                    table_name,
+                    id_column,
+                    vector_column,
+                    payload_column,
+                )
 
             return len(points)
         finally:
@@ -212,7 +235,9 @@ def migrate(
     )
 
     click.echo()
-    click.echo(f"🎉 Migration completed successfully! Migrated {processed_total} points from Qdrant to TiDB.")
+    click.echo(
+        f"🎉 Migration completed successfully! Migrated {processed_total} points from Qdrant to TiDB."
+    )
 
 
 def drop_vector_table(
@@ -242,7 +267,7 @@ def create_vector_table(
         distance_fn = "VEC_COSINE_DISTANCE"
     else:
         raise click.UsageError(f"Invalid distance metric: {distance_metric}")
-    
+
     preparer = db_engine.dialect.identifier_preparer
     index_name = preparer.quote_identifier(f"vec_idx_{table_name}_on_{vector_column}")
     table_name = preparer.quote_identifier(table_name)
@@ -281,15 +306,21 @@ def check_vector_table(
             session.execute(text(f"SELECT 1 FROM {table_name} LIMIT 1"))
         except Exception as e:
             raise Exception(f"Table {table_name} does not exist: {e}")
-        
+
         columns = session.execute(text(f"SHOW COLUMNS FROM {table_name};")).fetchall()
         column_names = [col[0] for col in columns]
         if id_column not in column_names:
-            raise Exception(f"Column `{id_column}` does not exist in table {table_name}")
+            raise Exception(
+                f"Column `{id_column}` does not exist in table {table_name}"
+            )
         if vector_column not in column_names:
-            raise Exception(f"Column `{vector_column}` does not exist in table {table_name}")
+            raise Exception(
+                f"Column `{vector_column}` does not exist in table {table_name}"
+            )
         if payload_column and payload_column not in column_names:
-            raise Exception(f"Column `{payload_column}` does not exist in table {table_name}")
+            raise Exception(
+                f"Column `{payload_column}` does not exist in table {table_name}"
+            )
 
 
 def insert_points(
@@ -318,11 +349,13 @@ def insert_points(
             id_value = point.id
             vector_str = json.dumps(point.vector)
             payload_str = json.dumps(point.payload)
-            insert_records.append({
-                "id": id_value,
-                "vector": vector_str,
-                "payload": payload_str,
-            })
+            insert_records.append(
+                {
+                    "id": id_value,
+                    "vector": vector_str,
+                    "payload": payload_str,
+                }
+            )
 
         session.execute(text(insert_sql), insert_records)
         session.commit()
@@ -340,7 +373,9 @@ def update_points(
     table_name = preparer.quote_identifier(table_name)
     id_column = preparer.quote_identifier(id_column)
     vector_column = preparer.quote_identifier(vector_column)
-    payload_column = preparer.quote_identifier(payload_column) if payload_column else None
+    payload_column = (
+        preparer.quote_identifier(payload_column) if payload_column else None
+    )
 
     with Session(db_engine) as session:
         if payload_column:
@@ -362,33 +397,23 @@ def update_points(
             vector_str = json.dumps(point.vector)
             if payload_column:
                 payload_str = json.dumps(point.payload)
-                update_records.append({
-                    "id": id_value,
-                    "vector": vector_str,
-                    "payload": payload_str,
-                })
+                update_records.append(
+                    {
+                        "id": id_value,
+                        "vector": vector_str,
+                        "payload": payload_str,
+                    }
+                )
             else:
-                update_records.append({
-                    "id": id_value,
-                    "vector": vector_str,
-                })
+                update_records.append(
+                    {
+                        "id": id_value,
+                        "vector": vector_str,
+                    }
+                )
 
         session.execute(text(update_sql), update_records)
         session.commit()
-
-
-def _load_sample_data(
-    qdrant_client: QdrantClient,
-    qdrant_collection_name: str,
-    snapshot_uri: str,
-):
-    """Internal helper function to load sample data from a snapshot."""
-    click.echo(f"⏳ Loading sample collection from {snapshot_uri}...")
-    qdrant_client.recover_snapshot(
-        collection_name=qdrant_collection_name,
-        location=snapshot_uri
-    )
-    click.echo(f"✅ Loaded sample collection from {snapshot_uri}")
 
 
 def load_sample(
@@ -399,7 +424,13 @@ def load_sample(
 ):
     """Load a sample collection from a Qdrant snapshot."""
     qdrant_client = QdrantClient(url=qdrant_api_url, api_key=qdrant_api_key)
-    _load_sample_data(qdrant_client, qdrant_collection_name, snapshot_uri)
+    click.echo(f"⏳ Loading sample collection from {snapshot_uri}...")
+    qdrant_client.recover_snapshot(
+        collection_name=qdrant_collection_name,
+        location=snapshot_uri,
+        wait=False,
+    )
+    click.echo(f"✅ Loaded sample collection in the background")
 
 
 def benchmark(
@@ -410,46 +441,32 @@ def benchmark(
     worker_list: list[int],
     batch_size_list: list[int],
     table_prefix: str = "benchmark_test",
-    snapshot_uri: Optional[str] = None,
+    cleanup_tables: bool = False,
 ):
     """Run performance benchmarks with different worker and batch size configurations."""
-    
+
     # Initialize Qdrant client
     qdrant_client = QdrantClient(url=qdrant_api_url, api_key=qdrant_api_key)
-    
-    # Handle data loading based on whether snapshot_uri is provided
-    if snapshot_uri:
-        # If snapshot_uri is provided, load sample data directly
-        click.echo(f"📦 Loading sample data from snapshot for collection '{qdrant_collection_name}'...")
-        _load_sample_data(qdrant_client, qdrant_collection_name, snapshot_uri)
-        
-        # Verify data was loaded successfully
-        if not qdrant_client.collection_exists(collection_name=qdrant_collection_name):
-            raise click.UsageError(f"Failed to load sample data for collection '{qdrant_collection_name}'")
-        
-        vector_count = qdrant_client.count(collection_name=qdrant_collection_name).count
-        if vector_count == 0:
-            raise click.UsageError(f"Failed to load sample data - collection '{qdrant_collection_name}' is still empty")
-    else:
-        # If no snapshot_uri, check existing collection
-        if not qdrant_client.collection_exists(collection_name=qdrant_collection_name):
-            raise click.UsageError(
-                f"Requested Qdrant collection '{qdrant_collection_name}' does not exist. "
-                f"Use --dataset=midlib to auto-load sample data."
-            )
-        
-        vector_count = qdrant_client.count(collection_name=qdrant_collection_name).count
-        if vector_count == 0:
-            raise click.UsageError(
-                f"Collection '{qdrant_collection_name}' exists but is empty. "
-                f"Use --dataset=midlib to auto-load sample data."
-            )
-    
+    if not qdrant_client.collection_exists(collection_name=qdrant_collection_name):
+        raise click.UsageError(
+            f"Qdrant collection '{qdrant_collection_name}' does not exist. "
+            f"Use `vec2tidb qdrant load-sample` to load sample data."
+        )
+
+    vector_count = qdrant_client.count(collection_name=qdrant_collection_name).count
+    if vector_count == 0:
+        raise click.UsageError(
+            f"Qdrant collection '{qdrant_collection_name}' is empty. "
+            f"Use `vec2tidb qdrant load-sample` to load sample data."
+        )
+
     # Get collection info
-    collection_info = qdrant_client.get_collection(collection_name=qdrant_collection_name)
+    collection_info = qdrant_client.get_collection(
+        collection_name=qdrant_collection_name
+    )
     vector_dimension = collection_info.config.params.vectors.size
     distance_metric = collection_info.config.params.vectors.distance.lower()
-    
+
     click.echo("🚀 Starting vec2tidb concurrent migration benchmark")
     click.echo("=" * 60)
     click.echo(f"Collection: {qdrant_collection_name}")
@@ -457,37 +474,49 @@ def benchmark(
     click.echo(f"Dimensions: {vector_dimension}")
     click.echo(f"Distance: {distance_metric}")
     click.echo("=" * 60)
-    
+
     # Generate test configurations
     test_configs = []
+    created_tables = []  # Track tables for potential cleanup
     for workers in worker_list:
         for batch_size in batch_size_list:
             test_configs.append((workers, batch_size))
-    
+
     results = []
-    
+
     # Run benchmark tests
     for i, (workers, batch_size) in enumerate(test_configs):
         table_suffix = f"{workers}w_{batch_size}b"
         table_name = f"{table_prefix}_{table_suffix}"
-        
-        click.echo(f"Testing workers={workers}, batch_size={batch_size}...")
-        
+        created_tables.append(table_name)  # Track this table
+
+        click.echo(f"⏳ Testing with workers={workers}, batch_size={batch_size}...")
+
         # Build command
         cmd = [
-            sys.executable, "-m", "vec2tidb.cli", "qdrant", "migrate",
-            "--qdrant-api-url", qdrant_api_url,
-            "--qdrant-collection-name", qdrant_collection_name,
-            "--tidb-database-url", tidb_database_url,
-            "--table-name", table_name,
-            "--workers", str(workers),
-            "--batch-size", str(batch_size),
-            "--drop-table"
+            sys.executable,
+            "-m",
+            "vec2tidb.cli",
+            "qdrant",
+            "migrate",
+            "--qdrant-api-url",
+            qdrant_api_url,
+            "--qdrant-collection-name",
+            qdrant_collection_name,
+            "--tidb-database-url",
+            tidb_database_url,
+            "--table-name",
+            table_name,
+            "--workers",
+            str(workers),
+            "--batch-size",
+            str(batch_size),
+            "--drop-table",
         ]
-        
+
         if qdrant_api_key:
             cmd.extend(["--qdrant-api-key", qdrant_api_key])
-        
+
         # Run test
         start_time = time.time()
         try:
@@ -499,27 +528,29 @@ def benchmark(
         except subprocess.CalledProcessError as e:
             click.echo(f"❌ Error: {e}")
             click.echo(f"stderr: {e.stderr}")
-            results.append((workers, batch_size, float('inf')))
-        
+            results.append((workers, batch_size, float("inf")))
+
         # Wait between tests (except for the last one)
         if i < len(test_configs) - 1:
-            click.echo("Waiting 2 seconds before next test...")
             time.sleep(2)
-    
+
     # Print results summary
-    click.echo("\n" + "=" * 60)
+    click.echo("\n" + "=" * 80)
     click.echo("📊 BENCHMARK RESULTS")
-    click.echo("=" * 60)
-    click.echo(f"{'Workers':<8} {'Batch Size':<12} {'Time (s)':<10} {'Performance':<12}")
-    click.echo("-" * 60)
-    
-    valid_times = [result[2] for result in results if result[2] != float('inf')]
-    best_time = min(valid_times) if valid_times else float('inf')
-    
+    click.echo("=" * 80)
+    click.echo(
+        f"{'Workers':<8} {'Batch Size':<12} {'Time (s)':<10} {'Records/s':<12} {'Performance':<12}"
+    )
+    click.echo("-" * 80)
+
+    valid_times = [result[2] for result in results if result[2] != float("inf")]
+    best_time = min(valid_times) if valid_times else float("inf")
+
     for workers, batch_size, execution_time in results:
-        if execution_time == float('inf'):
+        if execution_time == float("inf"):
             performance = "FAILED"
             time_str = "FAILED"
+            records_per_sec = "FAILED"
         else:
             speedup = best_time / execution_time
             if speedup >= 1.0:
@@ -527,19 +558,44 @@ def benchmark(
             else:
                 performance = f"{1/speedup:.2f}x slower"
             time_str = f"{execution_time:.2f}"
-        
-        click.echo(f"{workers:<8} {batch_size:<12} {time_str:<10} {performance:<12}")
-    
+            # Calculate records per second (throughput)
+            records_per_sec = f"{vector_count / execution_time:.0f}"
+
+        click.echo(
+            f"{workers:<8} {batch_size:<12} {time_str:<10} {records_per_sec:<12} {performance:<12}"
+        )
+
+    # Clean up benchmark tables if requested
+    if cleanup_tables:
+        click.echo("\n🧹 Cleaning up benchmark tables...")
+        db_engine = create_tidb_engine(tidb_database_url)
+        cleaned_count = 0
+        for table_name in created_tables:
+            try:
+                drop_vector_table(db_engine, table_name)
+                cleaned_count += 1
+            except Exception as e:
+                click.echo(f"❌ Failed to drop table {table_name}: {e}")
+
+        db_engine.dispose()
+
+    click.echo("🎉 Benchmark execution completed!")
+
     click.echo("\n💡 Recommendations:")
     if results:
         # Find best configuration
-        valid_results = [(w, b, t) for w, b, t in results if t != float('inf')]
+        valid_results = [(w, b, t) for w, b, t in results if t != float("inf")]
         if valid_results:
             best_workers, best_batch, best_time = min(valid_results, key=lambda x: x[2])
-            click.echo(f"   • Best performance: {best_workers} workers, batch size {best_batch}")
-            click.echo(f"   • Completed in {best_time:.2f} seconds")
+            best_throughput = vector_count / best_time
+            click.echo(
+                f"   • Best performance: {best_workers} workers, batch size {best_batch}"
+            )
+            click.echo(
+                f"   • Completed in {best_time:.2f} seconds ({best_throughput:.0f} records/s)"
+            )
         else:
             click.echo("   • All tests failed. Check your database connections.")
-    
+
     click.echo(f"   • For production use, consider your system's CPU cores and memory")
     click.echo(f"   • Monitor database connection limits when using many workers")

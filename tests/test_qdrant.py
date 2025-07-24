@@ -5,7 +5,10 @@ from unittest.mock import Mock, patch
 import pytest
 from qdrant_client.models import PointStruct
 
-from vec2tidb.commands.qdrant import migrate, create_vector_table, check_vector_table, insert_points, update_points
+from vec2tidb.commands.qdrant import (
+    migrate, create_vector_table, check_vector_table, insert_points, update_points,
+    get_snapshot_uri, load_sample, benchmark, drop_vector_table
+)
 
 
 @patch("vec2tidb.commands.qdrant.QdrantClient")
@@ -287,7 +290,8 @@ def test_create_vector_table():
             "vector",
             "payload",
             "cosine",
-            768
+            768,
+            "BIGINT"
         )
 
         mock_session.execute.assert_called_once()
@@ -328,7 +332,8 @@ def test_create_vector_table_l2_distance():
             "vector",
             "payload",
             "l2",
-            1536
+            1536,
+            "BIGINT"
         )
 
         mock_session.execute.assert_called_once()
@@ -363,7 +368,8 @@ def test_create_vector_table_invalid_distance():
                 "vector",
                 "payload",
                 "euclidean",
-                768
+                768,
+                "BIGINT"
             )
 
 
@@ -739,3 +745,380 @@ def test_migrate_multiple_workers(
     # Verify the correct parameters were passed to concurrent processor
     call_args = mock_process_concurrent.call_args
     assert call_args[1]['workers'] == 4
+
+
+def test_get_snapshot_uri_with_dataset():
+    """Test get_snapshot_uri function with valid dataset."""
+    
+    # Test with valid datasets
+    assert get_snapshot_uri(dataset="midlib") == "https://snapshots.qdrant.io/midlib.snapshot"
+    assert get_snapshot_uri(dataset="qdrant-docs") == "https://snapshots.qdrant.io/qdrant-docs-04-05.snapshot"
+    assert get_snapshot_uri(dataset="prefix-cache") == "https://snapshots.qdrant.io/prefix-cache.snapshot"
+
+
+def test_get_snapshot_uri_with_custom_uri():
+    """Test get_snapshot_uri function with custom snapshot URI."""
+    
+    custom_uri = "https://example.com/custom.snapshot"
+    assert get_snapshot_uri(snapshot_uri=custom_uri) == custom_uri
+    
+    # Custom URI takes precedence over dataset
+    assert get_snapshot_uri(dataset="midlib", snapshot_uri=custom_uri) == custom_uri
+
+
+def test_get_snapshot_uri_invalid_dataset():
+    """Test get_snapshot_uri function with invalid dataset."""
+    
+    import click
+    
+    with pytest.raises(click.UsageError, match="Invalid dataset: invalid_dataset"):
+        get_snapshot_uri(dataset="invalid_dataset")
+
+
+def test_get_snapshot_uri_no_params():
+    """Test get_snapshot_uri function with no parameters."""
+    
+    assert get_snapshot_uri() is None
+    assert get_snapshot_uri(dataset=None, snapshot_uri=None) is None
+
+
+@patch("vec2tidb.commands.qdrant.QdrantClient")
+@patch("vec2tidb.commands.qdrant.click")
+def test_load_sample(mock_click, mock_qdrant_client):
+    """Test load_sample function."""
+    
+    # Setup mocks
+    mock_client_instance = Mock()
+    mock_qdrant_client.return_value = mock_client_instance
+    
+    # Call load_sample function
+    load_sample(
+        qdrant_api_url="http://localhost:6333",
+        qdrant_api_key="test-key",
+        qdrant_collection_name="test_collection",
+        snapshot_uri="https://example.com/test.snapshot"
+    )
+    
+    # Verify calls
+    mock_qdrant_client.assert_called_once_with(
+        url="http://localhost:6333", api_key="test-key"
+    )
+    mock_client_instance.recover_snapshot.assert_called_once_with(
+        collection_name="test_collection",
+        location="https://example.com/test.snapshot",
+        wait=False
+    )
+
+
+@patch("vec2tidb.commands.qdrant.QdrantClient")
+@patch("vec2tidb.commands.qdrant.subprocess")
+@patch("vec2tidb.commands.qdrant.time")
+@patch("vec2tidb.commands.qdrant.sys")
+@patch("vec2tidb.commands.qdrant.click")
+def test_benchmark(mock_click, mock_sys, mock_time, mock_subprocess, mock_qdrant_client):
+    """Test benchmark function."""
+    
+    # Setup mocks
+    mock_client_instance = Mock()
+    mock_qdrant_client.return_value = mock_client_instance
+    mock_client_instance.collection_exists.return_value = True
+    mock_client_instance.count.return_value = Mock(count=1000)
+    
+    # Mock collection info
+    mock_vectors = Mock()
+    mock_vectors.size = 768
+    mock_vectors.distance = Mock()
+    mock_vectors.distance.lower.return_value = "cosine"
+    
+    mock_params = Mock()
+    mock_params.vectors = mock_vectors
+    
+    mock_config = Mock()
+    mock_config.params = mock_params
+    
+    mock_client_instance.get_collection.return_value = Mock(config=mock_config)
+    
+    # Mock subprocess results
+    mock_result = Mock()
+    mock_result.stdout = "Migration completed"
+    mock_result.stderr = ""
+    mock_subprocess.run.return_value = mock_result
+    
+    # Mock sys.executable
+    mock_sys.executable = "/usr/bin/python"
+    
+    # Mock time - need more time calls for 4 benchmark runs
+    mock_time.time.side_effect = [0.0, 10.0, 0.0, 15.0, 0.0, 20.0, 0.0, 25.0]  # Start/end times for each test
+    
+    # Call benchmark function
+    benchmark(
+        qdrant_api_url="http://localhost:6333",
+        qdrant_api_key="test-key",
+        qdrant_collection_name="test_collection",
+        tidb_database_url="mysql+pymysql://root@localhost:4000/test",
+        worker_list=[1, 2],
+        batch_size_list=[100, 200],
+        table_prefix="benchmark_test"
+    )
+    
+    # Verify Qdrant client calls
+    mock_qdrant_client.assert_called_once_with(
+        url="http://localhost:6333", api_key="test-key"
+    )
+    mock_client_instance.collection_exists.assert_called_once_with(
+        collection_name="test_collection"
+    )
+    mock_client_instance.count.assert_called_once_with(
+        collection_name="test_collection"
+    )
+    
+    # Verify subprocess was called for each configuration
+    assert mock_subprocess.run.call_count == 4  # 2 workers * 2 batch sizes
+
+
+@patch("vec2tidb.commands.qdrant.QdrantClient")
+def test_benchmark_collection_not_exists(mock_qdrant_client):
+    """Test benchmark function when collection doesn't exist."""
+    
+    # Setup mocks
+    mock_client_instance = Mock()
+    mock_qdrant_client.return_value = mock_client_instance
+    mock_client_instance.collection_exists.return_value = False
+    
+    # Import click to use real UsageError
+    import click
+    
+    # Call benchmark function and expect exception
+    with pytest.raises(click.UsageError, match="does not exist"):
+        benchmark(
+            qdrant_api_url="http://localhost:6333",
+            qdrant_api_key=None,
+            qdrant_collection_name="test_collection",
+            tidb_database_url="mysql+pymysql://root@localhost:4000/test",
+            worker_list=[1],
+            batch_size_list=[100],
+            table_prefix="benchmark_test"
+        )
+
+
+@patch("vec2tidb.commands.qdrant.QdrantClient")
+def test_benchmark_empty_collection(mock_qdrant_client):
+    """Test benchmark function when collection is empty."""
+    
+    # Setup mocks
+    mock_client_instance = Mock()
+    mock_qdrant_client.return_value = mock_client_instance
+    mock_client_instance.collection_exists.return_value = True
+    mock_client_instance.count.return_value = Mock(count=0)
+    
+    # Import click to use real UsageError
+    import click
+    
+    # Call benchmark function and expect exception
+    with pytest.raises(click.UsageError, match="is empty"):
+        benchmark(
+            qdrant_api_url="http://localhost:6333",
+            qdrant_api_key=None,
+            qdrant_collection_name="test_collection",
+            tidb_database_url="mysql+pymysql://root@localhost:4000/test",
+            worker_list=[1],
+            batch_size_list=[100],
+            table_prefix="benchmark_test"
+        )
+
+
+def test_drop_vector_table():
+    """Test drop_vector_table function."""
+    from unittest.mock import patch, Mock
+    
+    # Mock engine and session
+    mock_engine = Mock()
+    mock_session = Mock()
+    mock_session.__enter__ = Mock(return_value=mock_session)
+    mock_session.__exit__ = Mock(return_value=None)
+    
+    # Mock the identifier preparer
+    mock_preparer = Mock()
+    mock_preparer.quote_identifier.side_effect = lambda x: f"`{x}`"
+    mock_engine.dialect.identifier_preparer = mock_preparer
+    
+    with patch('vec2tidb.commands.qdrant.Session', return_value=mock_session):
+        drop_vector_table(mock_engine, "test_table")
+        
+        # Verify execute was called with DROP TABLE command
+        mock_session.execute.assert_called_once()
+        call_args = mock_session.execute.call_args[0][0]
+        assert "DROP TABLE IF EXISTS `test_table`" in str(call_args)
+        
+        # Verify commit was called
+        mock_session.commit.assert_called_once()
+
+
+@patch("vec2tidb.commands.qdrant.QdrantClient")
+@patch("vec2tidb.commands.qdrant.create_tidb_engine")
+@patch("vec2tidb.commands.qdrant.drop_vector_table")
+@patch("vec2tidb.commands.qdrant.create_vector_table")
+@patch("vec2tidb.commands.qdrant.process_batches_concurrent")
+@patch("vec2tidb.commands.qdrant.click")
+def test_migrate_with_drop_table(
+    mock_click,
+    mock_process_concurrent,
+    mock_create_table,
+    mock_drop_table,
+    mock_create_engine,
+    mock_qdrant_client,
+):
+    """Test migrate function with drop_table=True."""
+    
+    # Setup mocks
+    mock_client_instance = Mock()
+    mock_qdrant_client.return_value = mock_client_instance
+    mock_client_instance.collection_exists.return_value = True
+    mock_client_instance.count.return_value = Mock(count=100)
+    
+    # Mock the sample point for ID type detection
+    sample_point = PointStruct(id="test_id", vector=[1.0, 2.0], payload={})
+    mock_client_instance.scroll.return_value = ([sample_point], None)
+    
+    # Mock the collection info
+    mock_vectors = Mock()
+    mock_vectors.size = 768
+    mock_vectors.distance = Mock()
+    mock_vectors.distance.lower.return_value = "cosine"
+    
+    mock_params = Mock()
+    mock_params.vectors = mock_vectors
+    
+    mock_config = Mock()
+    mock_config.params = mock_params
+    
+    mock_client_instance.get_collection.return_value = Mock(config=mock_config)
+    
+    mock_engine = Mock()
+    mock_create_engine.return_value = mock_engine
+    mock_engine.dialect.identifier_preparer.quote_identifier.side_effect = lambda x: x
+    
+    mock_process_concurrent.return_value = 100
+    
+    # Call migrate function with drop_table=True
+    migrate(
+        mode="create",
+        qdrant_api_url="http://localhost:6333",
+        qdrant_api_key=None,
+        qdrant_collection_name="test",
+        tidb_database_url="mysql+pymysql://root@localhost:4000/test",
+        table_name="test_table",
+        id_column="id",
+        id_column_type="BIGINT",
+        vector_column="vector",
+        payload_column="payload",
+        drop_table=True,
+    )
+    
+    # Verify drop_vector_table was called
+    mock_drop_table.assert_called_once_with(mock_engine, "test_table")
+    
+    # Verify create_vector_table was called with VARCHAR type (auto-detected from string ID)
+    mock_create_table.assert_called_once_with(
+        mock_engine, "test_table", "id", "vector", "payload", 
+        distance_metric="cosine", dimensions=768, id_column_type="VARCHAR(7)"
+    )
+
+
+@patch("vec2tidb.commands.qdrant.QdrantClient")
+@patch("vec2tidb.commands.qdrant.create_tidb_engine")
+@patch("vec2tidb.commands.qdrant.create_vector_table")
+@patch("vec2tidb.commands.qdrant.process_batches_concurrent")
+@patch("vec2tidb.commands.qdrant.click")
+def test_migrate_id_type_detection_integer(
+    mock_click,
+    mock_process_concurrent,
+    mock_create_table,
+    mock_create_engine,
+    mock_qdrant_client,
+):
+    """Test migrate function with integer ID type detection."""
+    
+    # Setup mocks
+    mock_client_instance = Mock()
+    mock_qdrant_client.return_value = mock_client_instance
+    mock_client_instance.collection_exists.return_value = True
+    mock_client_instance.count.return_value = Mock(count=100)
+    
+    # Mock the sample point with integer ID
+    sample_point = PointStruct(id=123, vector=[1.0, 2.0], payload={})
+    mock_client_instance.scroll.return_value = ([sample_point], None)
+    
+    # Mock the collection info
+    mock_vectors = Mock()
+    mock_vectors.size = 768
+    mock_vectors.distance = Mock()
+    mock_vectors.distance.lower.return_value = "cosine"
+    
+    mock_params = Mock()
+    mock_params.vectors = mock_vectors
+    
+    mock_config = Mock()
+    mock_config.params = mock_params
+    
+    mock_client_instance.get_collection.return_value = Mock(config=mock_config)
+    
+    mock_engine = Mock()
+    mock_create_engine.return_value = mock_engine
+    mock_engine.dialect.identifier_preparer.quote_identifier.side_effect = lambda x: x
+    
+    mock_process_concurrent.return_value = 100
+    
+    # Call migrate function
+    migrate(
+        mode="create",
+        qdrant_api_url="http://localhost:6333",
+        qdrant_api_key=None,
+        qdrant_collection_name="test",
+        tidb_database_url="mysql+pymysql://root@localhost:4000/test",
+        table_name="test_table",
+        id_column="id",
+        id_column_type="BIGINT",
+        vector_column="vector",
+        payload_column="payload",
+    )
+    
+    # Verify create_vector_table was called with BIGINT type (auto-detected from integer ID)
+    mock_create_table.assert_called_once_with(
+        mock_engine, "test_table", "id", "vector", "payload", 
+        distance_metric="cosine", dimensions=768, id_column_type="BIGINT"
+    )
+
+
+@patch("vec2tidb.commands.qdrant.QdrantClient")
+@patch("vec2tidb.commands.qdrant.create_tidb_engine")
+def test_migrate_unsupported_id_type(mock_create_engine, mock_qdrant_client):
+    """Test migrate function with unsupported ID type."""
+    
+    # Setup mocks
+    mock_client_instance = Mock()
+    mock_qdrant_client.return_value = mock_client_instance
+    mock_client_instance.collection_exists.return_value = True
+    mock_client_instance.count.return_value = Mock(count=100)
+    
+    # Mock the sample point with unsupported ID type (using a dict to bypass validation)
+    sample_point = Mock()
+    sample_point.id = 123.45  # float ID (unsupported)
+    sample_point.vector = [1.0, 2.0]
+    sample_point.payload = {}
+    mock_client_instance.scroll.return_value = ([sample_point], None)
+    
+    # Call migrate function and expect exception
+    with pytest.raises(Exception, match="Unsupported Qdrant point ID type"):
+        migrate(
+            mode="create",
+            qdrant_api_url="http://localhost:6333",
+            qdrant_api_key=None,
+            qdrant_collection_name="test",
+            tidb_database_url="mysql+pymysql://root@localhost:4000/test",
+            table_name="test_table",
+            id_column="id",
+            id_column_type="BIGINT",
+            vector_column="vector",
+            payload_column="payload",
+        )

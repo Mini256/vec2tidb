@@ -56,21 +56,30 @@ stop-qdrant: ## Stop and remove local Qdrant instance
 	docker stop qdrant-local || true
 	docker rm qdrant-local || true
 
-test-local-migration: ## Test migration with local databases (requires start-dbs first)
-	@echo "Testing migration with local databases..."
-	@echo "TiDB URL: mysql+pymysql://root@localhost:4000/test"
-	@echo "Qdrant URL: http://localhost:6333"
-	@echo ""
-	uv run vec2tidb qdrant migrate test http://localhost:6333 \
-	    --tidb-database-url "mysql+pymysql://root@localhost:4000/test" \
-	    --mode create
+test-local-sample: ## Test local Qdrant instance
+	@uv run vec2tidb qdrant load-sample \
+		--qdrant-api-url http://localhost:6333 \
+		--qdrant-collection-name vec2tidb_local_test \
+		--dataset qdrant-docs
 
-benchmark: ## Test benchmark with local databases (requires start-dbs first)
+test-migration: ## Test migration with local databases (requires start-dbs first)
+	@uv run vec2tidb qdrant migrate \
+		--qdrant-api-url http://localhost:6333 \
+		--qdrant-collection-name vec2tidb_local_test \
+		--tidb-database-url "mysql+pymysql://root@localhost:4000/test" \
+		--mode create \
+		--drop-table
+
+test-benchmark: ## Test benchmark with local databases (requires start-dbs first)
 	@uv run vec2tidb qdrant benchmark \
 		--qdrant-api-url http://localhost:6333 \
-		--qdrant-collection-name benchmark_$(shell date +%s) \
+		--qdrant-collection-name vec2tidb_local_test \
 		--tidb-database-url "mysql+pymysql://root@localhost:4000/test" \
 		--workers 1,2,4,8 \
-		--batch-sizes 100,500,1000 \
-		--table-prefix benchmark_$(shell date +%s) \
-		--dataset qdrant-web-site-docs-2024
+		--batch-sizes 100,200,400 \
+		--table-prefix vec2tidb_local_test \
+		--cleanup-tables
+
+
+
+	

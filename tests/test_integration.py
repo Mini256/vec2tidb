@@ -278,6 +278,144 @@ def test_qdrant_migration_update_mode(
         session.commit()
 
 
+@pytest.mark.skipif(not check_qdrant_available(), reason="Qdrant not available")
+def test_qdrant_load_sample_command(qdrant_client: QdrantClient):
+    """Test CLI load-sample command."""
+    collection_name = generate_unique_name("sample_test")
+    
+    print(f"🚀 Testing CLI load-sample command...")
+    print(f"   Collection: {collection_name}")
+    
+    try:
+        # Run load-sample command
+        result = run_cli_command([
+            "qdrant",
+            "load-sample",
+            "--qdrant-api-url", QDRANT_API_URL,
+            "--qdrant-collection-name", collection_name,
+            "--dataset", "midlib"
+        ])
+        
+        assert result.exit_code == 0, f"Load-sample command should succeed: {result.stdout}"
+        
+        # Wait a bit for the snapshot recovery to complete
+        time.sleep(10)
+        
+        # Verify collection was created
+        assert qdrant_client.collection_exists(collection_name=collection_name), "Collection should exist after load-sample"
+        
+        # Verify collection has data
+        count = qdrant_client.count(collection_name=collection_name).count
+        assert count > 0, "Collection should have data after load-sample"
+        
+        print(f"✅ Load-sample test completed! Created collection with {count} points")
+        
+    finally:
+        # Clean up
+        if qdrant_client.collection_exists(collection_name=collection_name):
+            qdrant_client.delete_collection(collection_name=collection_name)
+
+
+@pytest.mark.skipif(not check_qdrant_available(), reason="Qdrant not available")
+@pytest.mark.skipif(not check_tidb_available(), reason="TiDB not available")
+def test_qdrant_migration_with_drop_table(
+    sample_collection_name: str,
+    sample_collection: CollectionInfo,
+    tidb_engine: Engine,
+):
+    """Test CLI migration with drop-table flag."""
+    collection_name = sample_collection_name
+    table_name = generate_unique_name("drop_test")
+    
+    print(f"🚀 Testing CLI migration with drop-table flag...")
+    print(f"   Collection: {collection_name}")
+    print(f"   Table: {table_name}")
+    
+    # Create a table first
+    with Session(tidb_engine) as session:
+        session.execute(text(f"""
+            CREATE TABLE {table_name} (
+                old_column VARCHAR(255)
+            )
+        """))
+        session.commit()
+    
+    # Run migration with drop-table flag
+    result = run_cli_command([
+        "qdrant",
+        "migrate",
+        "--qdrant-api-url", QDRANT_API_URL,
+        "--qdrant-collection-name", collection_name,
+        "--tidb-database-url", TIDB_DATABASE_URL,
+        "--table-name", table_name,
+        "--mode", "create",
+        "--drop-table"
+    ])
+    
+    assert result.exit_code == 0, f"Migration with drop-table should succeed: {result.stdout}"
+    
+    # Verify table was recreated with correct schema
+    with Session(tidb_engine) as session:
+        columns = session.execute(text(f"SHOW COLUMNS FROM {table_name}")).fetchall()
+        column_names = [col[0] for col in columns]
+        print(f"📋 New table columns: {column_names}")
+        
+        # Should have vector columns, not the old_column
+        assert "vector" in column_names, "New table should have vector column"
+        assert "old_column" not in column_names, "Old column should be gone"
+    
+    print("✅ Drop-table test completed!")
+    
+    # Clean up
+    with Session(tidb_engine) as session:
+        session.execute(text(f"DROP TABLE IF EXISTS `{table_name}`"))
+        session.commit()
+
+
+@pytest.mark.skipif(not check_qdrant_available(), reason="Qdrant not available")
+@pytest.mark.skipif(not check_tidb_available(), reason="TiDB not available")
+def test_qdrant_benchmark_command(
+    sample_collection_name: str,
+    sample_collection: CollectionInfo,
+    tidb_engine: Engine,
+):
+    """Test CLI benchmark command."""
+    collection_name = sample_collection_name
+    table_prefix = generate_unique_name("bench")
+    
+    print(f"🚀 Testing CLI benchmark command...")
+    print(f"   Collection: {collection_name}")
+    print(f"   Table prefix: {table_prefix}")
+    
+    # Run benchmark with small worker and batch size list for testing
+    result = run_cli_command([
+        "qdrant",
+        "benchmark",
+        "--qdrant-api-url", QDRANT_API_URL,
+        "--qdrant-collection-name", collection_name,
+        "--tidb-database-url", TIDB_DATABASE_URL,
+        "--workers", "1,2",
+        "--batch-sizes", "50,100",
+        "--table-prefix", table_prefix
+    ])
+    
+    assert result.exit_code == 0, f"Benchmark command should succeed: {result.stdout}"
+    assert "BENCHMARK RESULTS" in result.stdout, "Output should contain benchmark results"
+    assert "Workers" in result.stdout, "Output should contain worker information"
+    assert "Records/s" in result.stdout, "Output should contain throughput information"
+    
+    print("✅ Benchmark test completed!")
+    
+    # Clean up benchmark tables
+    with Session(tidb_engine) as session:
+        # Get all tables that start with the prefix
+        tables_result = session.execute(text("SHOW TABLES")).fetchall()
+        for (table,) in tables_result:
+            if table.startswith(table_prefix):
+                session.execute(text(f"DROP TABLE IF EXISTS `{table}`"))
+        session.commit()
+
+
 def test_cli_help_commands():
     """Test CLI help commands."""
     
@@ -298,5 +436,48 @@ def test_cli_help_commands():
     assert result.exit_code == 0, "Migrate help should succeed"
     assert "migrate" in result.stdout, "Help should contain migrate"
     
+    # Test load-sample help
+    result = run_cli_command(["qdrant", "load-sample", "--help"])
+    assert result.exit_code == 0, "Load-sample help should succeed"
+    assert "load-sample" in result.stdout, "Help should contain load-sample"
+    
+    # Test benchmark help
+    result = run_cli_command(["qdrant", "benchmark", "--help"])
+    assert result.exit_code == 0, "Benchmark help should succeed"
+    assert "benchmark" in result.stdout, "Help should contain benchmark"
+    
     print("✅ CLI help commands test completed!")
+
+
+def test_cli_error_handling():
+    """Test CLI error handling for invalid inputs."""
+    
+    print(f"🚀 Testing CLI error handling...")
+    
+    # Test migration with non-existent collection
+    result = run_cli_command([
+        "qdrant",
+        "migrate",
+        "--qdrant-api-url", QDRANT_API_URL,
+        "--qdrant-collection-name", "nonexistent_collection_12345",
+        "--tidb-database-url", TIDB_DATABASE_URL,
+        "--mode", "create"
+    ])
+    
+    assert result.exit_code != 0, "Migration with non-existent collection should fail"
+    assert "does not exist" in result.stdout, "Error message should mention collection doesn't exist"
+    
+    # Test load-sample with invalid dataset
+    result = run_cli_command([
+        "qdrant",
+        "load-sample",
+        "--qdrant-api-url", QDRANT_API_URL,
+        "--qdrant-collection-name", "test_collection",
+        "--dataset", "invalid_dataset_name"
+    ])
+    
+    assert result.exit_code != 0, "Load-sample with invalid dataset should fail"
+    assert "Invalid value for '--dataset'" in result.stdout, "Error message should mention invalid dataset"
+    
+    print("✅ CLI error handling test completed!")
 

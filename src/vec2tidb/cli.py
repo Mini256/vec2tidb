@@ -24,18 +24,20 @@ def tidb_connection_options(f):
         "--tidb-database-url",
         envvar="TIDB_DATABASE_URL",
         default="mysql+pymysql://root:@localhost:4000/test",
-        help="TiDB database URL (default: mysql+pymysql://root:@localhost:4000/test)"
+        help="TiDB database URL (default: mysql+pymysql://root:@localhost:4000/test)",
     )(f)
     return f
 
 
 # Subcommands
 
+
 # Subcommand: qdrant
 @cli.group(name="qdrant")
 def qdrant_group():
     """Qdrant database migration commands."""
     pass
+
 
 # Common options for qdrant
 
@@ -46,32 +48,18 @@ def qdrant_connection_options(f):
         "--qdrant-api-url",
         envvar="QDRANT_API_URL",
         default="http://localhost:6333",
-        help="Qdrant API URL (default: http://localhost:6333)"
+        help="Qdrant API URL (default: http://localhost:6333)",
     )(f)
     f = click.option(
-        "--qdrant-api-key", 
+        "--qdrant-api-key",
         envvar="QDRANT_API_KEY",
-        help="Qdrant API key (if authentication is enabled)"
+        help="Qdrant API key (if authentication is enabled)",
     )(f)
     f = click.option(
-        "--qdrant-collection-name", 
-        envvar="QDRANT_COLLECTION_NAME", 
+        "--qdrant-collection-name",
+        envvar="QDRANT_COLLECTION_NAME",
         required=True,
-        help="Qdrant collection name"
-    )(f)
-    return f
-
-def sample_data_options(f):
-    """Common sample data options."""
-    f = click.option(
-        "--dataset",
-        type=click.Choice(["midlib", "qdrant-web-site-docs-2024", "prefix-cache"]),
-        help="Auto-load sample dataset if collection doesn't exist or is empty"
-    )(f)
-    f = click.option(
-        "--snapshot-uri",
-        envvar="SNAPSHOT_URI",
-        help="Custom snapshot URI for auto-loading data (overrides --dataset)"
+        help="Qdrant collection name",
     )(f)
     return f
 
@@ -100,16 +88,13 @@ def sample_data_options(f):
 @click.option(
     "--id-column",
     help=(
-        "ID column name is required in update mode. "
-        "Default to 'id' in create mode."
+        "ID column name is required in update mode. " "Default to 'id' in create mode."
     ),
 )
 @click.option(
     "--id-column-type",
     default="BIGINT",
-    help=(
-        "ID column type, default to 'BIGINT'."
-    ),
+    help=("ID column type, default to 'BIGINT'."),
 )
 @click.option(
     "--vector-column",
@@ -126,14 +111,12 @@ def sample_data_options(f):
     ),
 )
 @click.option(
-    "--batch-size",
-    default=100,
-    help="Batch size for migration (default: 100)"
+    "--batch-size", default=100, help="Batch size for migration (default: 100)"
 )
 @click.option(
     "--workers",
     default=1,
-    help="Number of concurrent workers for migration (default: 1)"
+    help="Number of concurrent workers for migration (default: 1)",
 )
 @click.option(
     "--drop-table",
@@ -203,15 +186,15 @@ def qdrant_migrate(
     "--dataset",
     required=True,
     default="midlib",
-    type=click.Choice(["midlib", "qdrant-web-site-docs-2024", "prefix-cache"]),
-    help="Sample dataset to load (default: midlib)"
+    type=click.Choice(["midlib", "qdrant-docs", "prefix-cache"]),
+    help="Sample dataset to load (default: midlib)",
 )
 @click.option(
     "--snapshot-uri",
     envvar="SNAPSHOT_URI",
     help="Custom snapshot URI (auto-determined from dataset if not provided)",
 )
-def qdrant_load_sample_collection(
+def qdrant_load_sample(
     qdrant_api_url: str,
     qdrant_api_key: str,
     qdrant_collection_name: str,
@@ -234,21 +217,25 @@ def qdrant_load_sample_collection(
 @qdrant_group.command(name="benchmark")
 @qdrant_connection_options
 @tidb_connection_options
-@sample_data_options
 @click.option(
     "--workers",
     default="1,2,4,8",
-    help="Comma-separated list of worker counts to test (default: 1,2,4,8)"
+    help="Comma-separated list of worker counts to test (default: 1,2,4,8)",
 )
 @click.option(
     "--batch-sizes",
     default="100,500,1000",
-    help="Comma-separated list of batch sizes to test (default: 100,500,1000)"
+    help="Comma-separated list of batch sizes to test (default: 100,500,1000)",
 )
 @click.option(
     "--table-prefix",
     default="benchmark_test",
-    help="Prefix for benchmark table names (default: benchmark_test)"
+    help="Prefix for benchmark table names (default: benchmark_test)",
+)
+@click.option(
+    "--cleanup-tables",
+    is_flag=True,
+    help="Drop all benchmark tables after tests are completed",
 )
 def qdrant_benchmark(
     qdrant_api_url: str,
@@ -258,15 +245,13 @@ def qdrant_benchmark(
     workers: str,
     batch_sizes: str,
     table_prefix: str,
-    dataset: Optional[str],
-    snapshot_uri: Optional[str],
+    cleanup_tables: bool,
 ):
     """Run performance benchmarks with different worker and batch size configurations."""
 
     worker_list = [int(w.strip()) for w in workers.split(",")]
     batch_size_list = [int(b.strip()) for b in batch_sizes.split(",")]
-    resolved_snapshot_uri = get_snapshot_uri(dataset=dataset, snapshot_uri=snapshot_uri)
-    
+
     qdrant_benchmark_impl(
         qdrant_api_url=qdrant_api_url,
         qdrant_api_key=qdrant_api_key,
@@ -275,7 +260,7 @@ def qdrant_benchmark(
         worker_list=worker_list,
         batch_size_list=batch_size_list,
         table_prefix=table_prefix,
-        snapshot_uri=resolved_snapshot_uri,
+        cleanup_tables=cleanup_tables,
     )
 
 

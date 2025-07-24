@@ -57,11 +57,17 @@ make test
 # Run tests with coverage
 make test-cov
 
+# Test local sample
+make test-local-sample
+
+# Test migration
+make test-migration
+
+# Test benchmark
+make test-benchmark
+
 # Run specific test
 uv run pytest tests/test_qdrant.py::test_migrate_create_mode -v
-
-# Benchmark
-make benchmark
 ```
 
 ## Development Commands

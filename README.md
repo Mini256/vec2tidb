@@ -130,7 +130,7 @@ vec2tidb qdrant load-sample \
 | `--qdrant-api-url`         | Qdrant API endpoint. Default: `http://localhost:6333`                                           |
 | `--qdrant-api-key`         | Qdrant API key (if authentication is enabled)                                                    |
 | `--qdrant-collection-name` | Name of the target Qdrant collection (required)                                                  |
-| `--dataset`                | Sample dataset to load: `midlib`, `qdrant-web-site-docs-2024`, `prefix-cache`. Default: `midlib` (required) |
+| `--dataset`                | Sample dataset to load: `midlib`, `qdrant-docs`, `prefix-cache`. Default: `midlib` (required) |
 | `--snapshot-uri`           | Custom snapshot URI (auto-determined from dataset if not provided)                              |
 
 #### Command: `qdrant benchmark`
@@ -155,7 +155,7 @@ vec2tidb qdrant benchmark \
 | `--qdrant-api-key`         | Qdrant API key (if authentication is enabled)                                                    |
 | `--qdrant-collection-name` | Name of the source Qdrant collection (required)                                                  |
 | `--tidb-database-url`      | TiDB connection string. Default: `mysql+pymysql://root:@localhost:4000/test`                    |
-| `--dataset`                | Auto-load sample dataset: `midlib`, `qdrant-web-site-docs-2024`, `prefix-cache`                |
+| `--dataset`                | Auto-load sample dataset: `midlib`, `qdrant-docs`, `prefix-cache`                |
 | `--snapshot-uri`           | Custom snapshot URI for auto-loading data (overrides --dataset)                                 |
 | `--workers`                | Comma-separated list of worker counts to test. Default: `1,2,4,8`                               |
 | `--batch-sizes`            | Comma-separated list of batch sizes to test. Default: `100,500,1000`                           |
