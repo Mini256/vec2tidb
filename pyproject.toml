@@ -1,6 +1,6 @@
 [project]
 name = "vec2tidb"
-version = "0.0.2"
+version = "0.0.3"
 description = "A CLI tool for migrating data from third-party vector databases to TiDB"
 authors = [
     {name = "Mini256", email = "minianter@foxmail.com"}
