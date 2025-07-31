@@ -42,9 +42,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build]
 exclude = [
     "/.*",
-    "/docs",
+    "/dict",
     "/tests",
-    'DEVELOPMENT.md'
+    "/assets",
+    "DEVELOPMENT.md"
 ]
 
 [tool.hatch.build.targets.wheel]
