@@ -299,8 +299,18 @@ def qdrant_benchmark(
 )
 @click.option(
     "--batch-size",
-    default=100,
-    help="Batch size for processing (default: 100)",
+    default=500,
+    help="Batch size for processing (default: 500)",
+)
+@click.option(
+    "--max-concurrent-batches",
+    default=5,
+    help="Maximum number of concurrent batch requests (default: 5)",
+)
+@click.option(
+    "--buffer-size",
+    default=10000,
+    help="File buffer size in bytes (default: 10000)",
 )
 def qdrant_dump(
     qdrant_api_url: str,
@@ -312,8 +322,10 @@ def qdrant_dump(
     no_vectors: bool,
     no_payload: bool,
     batch_size: int,
+    max_concurrent_batches: int,
+    buffer_size: int,
 ):
-    """Export Qdrant collection data to CSV format."""
+    """Export Qdrant collection data to CSV format with optimized performance."""
 
     qdrant_dump_impl(
         qdrant_api_url=qdrant_api_url,
@@ -325,6 +337,8 @@ def qdrant_dump(
         include_vectors=not no_vectors,
         include_payload=not no_payload,
         batch_size=batch_size,
+        max_concurrent_batches=max_concurrent_batches,
+        buffer_size=buffer_size,
     )
 
 

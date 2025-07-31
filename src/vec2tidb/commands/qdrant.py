@@ -613,18 +613,25 @@ async def dump(
     offset: Optional[int] = None,
     include_vectors: bool = True,
     include_payload: bool = True,
-    batch_size: int = 100,
+    batch_size: int = 500,
+    max_concurrent_batches: int = 5,
+    buffer_size: int = 10000,
 ):
-    """Export Qdrant collection data to CSV format using batch processing."""
+    """Export Qdrant collection data to CSV format using optimized batch processing."""
     
     import csv
     import os
+    import asyncio
     from qdrant_client import AsyncQdrantClient
     from tqdm import tqdm
-    
-    # Initialize async Qdrant client
-    qdrant_client = AsyncQdrantClient(url=qdrant_api_url, api_key=qdrant_api_key)
-    
+    from collections import deque
+
+    qdrant_client = AsyncQdrantClient(
+        url=qdrant_api_url, 
+        api_key=qdrant_api_key,
+        timeout=60.0,
+    )
+
     try:
         # Check if collection exists
         collection_exists = await qdrant_client.collection_exists(collection_name=qdrant_collection_name)
@@ -654,13 +661,15 @@ async def dump(
         
         actual_limit = min(limit, total_count)
         
-        click.echo(f"📊 Exporting {actual_limit} records from collection '{qdrant_collection_name}'")
+        click.echo(f"🚀 Optimized export of {actual_limit} records from collection '{qdrant_collection_name}'")
         click.echo(f"📁 Output file: {output_file}")
         click.echo(f"🔢 Vector dimension: {vector_dimension}")
         click.echo(f"📏 Distance metric: {vector_distance_metric}")
         click.echo(f"📋 Include vectors: {include_vectors}")
         click.echo(f"📄 Include payload: {include_payload}")
         click.echo(f"📦 Batch size: {batch_size}")
+        click.echo(f"⚡ Max concurrent batches: {max_concurrent_batches}")
+        click.echo(f"💾 Buffer size: {buffer_size}")
         click.echo()
         
         # Create output directory if it doesn't exist
@@ -676,8 +685,14 @@ async def dump(
         if include_payload:
             headers.append('payload')
         
-        # Open CSV file and write headers
-        with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
+        # Pre-compile JSON serialization for payload
+        json_dumps = json.dumps
+
+        # Add elapsed time for the dump process
+        start_time = time.time()
+        
+        # Use buffered writing for better performance
+        with open(output_file, 'w', newline='', encoding='utf-8', buffering=buffer_size) as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow(headers)
             
@@ -685,58 +700,142 @@ async def dump(
             total_batches = (actual_limit + batch_size - 1) // batch_size
             
             # Create progress bar
-            with tqdm(total=actual_limit, desc="Exporting", unit="records") as pbar:
+            with tqdm(total=actual_limit, desc="Exporting", unit=" records") as pbar:
                 current_offset = offset or 0
                 records_exported = 0
                 
-                for batch_num in range(total_batches):
-                    # Calculate current batch size
-                    current_batch_size = min(batch_size, actual_limit - records_exported)
-                    
-                    # Fetch batch from Qdrant
-                    points, next_offset = await qdrant_client.scroll(
-                        collection_name=qdrant_collection_name,
-                        limit=current_batch_size,
-                        offset=current_offset,
-                        with_payload=include_payload,
-                        with_vectors=include_vectors,
-                    )
-                    
-                    if not points:
-                        break
-                    
-                    # Write batch to CSV
-                    for point in points:
-                        row = [point.id]
-                        
-                        if include_vectors:
-                            row.extend(point.vector)
-                        
-                        if include_payload:
-                            row.append(json.dumps(point.payload) if point.payload else '')
-                        
-                        writer.writerow(row)
-                    
-                    # Update progress
-                    records_exported += len(points)
-                    pbar.update(len(points))
-                    
-                    # Update offset for next batch
-                    current_offset = next_offset
-                    
-                    # Check if we've reached the limit
+                # Use semaphore to limit concurrent batches
+                semaphore = asyncio.Semaphore(max_concurrent_batches)
+                
+                async def fetch_batch(batch_offset, batch_size_limit):
+                    """Fetch a single batch with semaphore control."""
+                    async with semaphore:
+                        max_retries = 3
+                        for attempt in range(max_retries):
+                            try:
+                                points, next_offset = await qdrant_client.scroll(
+                                    collection_name=qdrant_collection_name,
+                                    limit=batch_size_limit,
+                                    offset=batch_offset,
+                                    with_payload=include_payload,
+                                    with_vectors=include_vectors,
+                                )
+                                return points, next_offset
+                            except Exception as e:
+                                if "Message too long" in str(e) and batch_size_limit > 100:
+                                    # Reduce batch size for gRPC message size issues
+                                    new_batch_size = batch_size_limit // 2
+                                    click.echo(f"⚠️ gRPC message too long, reducing batch size from {batch_size_limit} to {new_batch_size}")
+                                    if new_batch_size >= 100:
+                                        return await fetch_batch(batch_offset, new_batch_size)
+                                elif attempt < max_retries - 1:
+                                    click.echo(f"⚠️ Error fetching batch at offset {batch_offset} (attempt {attempt + 1}/{max_retries}): {e}")
+                                    await asyncio.sleep(1)  # Wait before retry
+                                    continue
+                                else:
+                                    click.echo(f"❌ Failed to fetch batch at offset {batch_offset} after {max_retries} attempts: {e}")
+                                    return [], None
+                        return [], None
+                
+                # Process batches with controlled concurrency
+                pending_batches = deque()
+                completed_batches = deque()
+                
+                # Start initial batch requests
+                for i in range(min(max_concurrent_batches, total_batches)):
                     if records_exported >= actual_limit:
                         break
+                    
+                    batch_offset = current_offset + (i * batch_size)
+                    current_batch_size = min(batch_size, actual_limit - records_exported - (i * batch_size))
+                    
+                    if current_batch_size > 0:
+                        task = asyncio.create_task(fetch_batch(batch_offset, current_batch_size))
+                        pending_batches.append((task, batch_offset))
+                
+                # Process batches as they complete
+                while pending_batches and records_exported < actual_limit:
+                    # Wait for next batch to complete
+                    done, pending = await asyncio.wait(
+                        [task for task, _ in pending_batches],
+                        return_when=asyncio.FIRST_COMPLETED
+                    )
+                    
+                    # Process completed batches
+                    for task in done:
+                        points, next_offset = await task
+                        
+                        if points:
+                            # Optimize CSV writing with batch processing
+                            rows = []
+                            for point in points:
+                                row = [point.id]
+                                
+                                if include_vectors:
+                                    row.extend(point.vector)
+                                
+                                if include_payload:
+                                    row.append(json_dumps(point.payload) if point.payload else '')
+                                
+                                rows.append(row)
+                            
+                            # Write all rows at once
+                            writer.writerows(rows)
+                            
+                            # Update progress
+                            records_exported += len(points)
+                            pbar.update(len(points))
+                        
+                        # Remove completed task from pending
+                        pending_batches = deque((t, offset) for t, offset in pending_batches if t != task)
+                        
+                        # Start new batch if needed
+                        if records_exported < actual_limit and len(pending_batches) < max_concurrent_batches:
+                            next_batch_offset = current_offset + (len(pending_batches) + len(completed_batches)) * batch_size
+                            remaining_records = actual_limit - records_exported
+                            current_batch_size = min(batch_size, remaining_records)
+                            
+                            if current_batch_size > 0:
+                                new_task = asyncio.create_task(fetch_batch(next_batch_offset, current_batch_size))
+                                pending_batches.append((new_task, next_batch_offset))
+                
+                # Wait for remaining batches
+                if pending_batches:
+                    remaining_tasks = [task for task, _ in pending_batches]
+                    remaining_results = await asyncio.gather(*remaining_tasks, return_exceptions=True)
+                    
+                    for result in remaining_results:
+                        if isinstance(result, Exception):
+                            click.echo(f"⚠️ Error in remaining batch: {result}")
+                        elif result[0]:  # points exist
+                            points, _ = result
+                            rows = []
+                            for point in points:
+                                row = [point.id]
+                                
+                                if include_vectors:
+                                    row.extend(point.vector)
+                                
+                                if include_payload:
+                                    row.append(json_dumps(point.payload) if point.payload else '')
+                                
+                                rows.append(row)
+                            
+                            writer.writerows(rows)
+                            records_exported += len(points)
+                            pbar.update(len(points))
         
         # Get final file size
         file_size = os.path.getsize(output_file)
         file_size_mb = file_size / (1024 * 1024)
+        elapsed_time = time.time() - start_time
         
         click.echo()
-        click.echo(f"✅ Export completed successfully!")
+        click.echo(f"🚀 Optimized export completed successfully!")
         click.echo(f"📊 Records exported: {records_exported}")
         click.echo(f"📁 File size: {file_size_mb:.2f} MB")
         click.echo(f"📄 Output file: {output_file}")
+        click.echo(f"⏱️ Elapsed time: {elapsed_time:.2f} seconds")
         
     finally:
         # Close the async client
@@ -752,7 +851,9 @@ def dump_sync(
     offset: Optional[int] = None,
     include_vectors: bool = True,
     include_payload: bool = True,
-    batch_size: int = 100,
+    batch_size: int = 500,
+    max_concurrent_batches: int = 5,
+    buffer_size: int = 10000,
 ):
     """Synchronous wrapper for the async dump function."""
     return asyncio.run(dump(
@@ -765,4 +866,7 @@ def dump_sync(
         include_vectors=include_vectors,
         include_payload=include_payload,
         batch_size=batch_size,
+        max_concurrent_batches=max_concurrent_batches,
+        buffer_size=buffer_size,
     ))
+
