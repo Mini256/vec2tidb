@@ -808,7 +808,7 @@ async def dump(
                                 row = [point.id]
                                 
                                 if include_vectors:
-                                    row.extend(point.vector)
+                                    row.append(point.vector)
                                 
                                 if include_payload:
                                     row.append(json_dumps(point.payload) if point.payload else '')
