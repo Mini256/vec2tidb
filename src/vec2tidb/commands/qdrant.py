@@ -681,7 +681,7 @@ async def dump(
         # Prepare CSV headers
         headers = ['id']
         if include_vectors:
-            headers.extend([f'vector_{i}' for i in range(vector_dimension)])
+            headers.extend(['vector'])
         if include_payload:
             headers.append('payload')
         
@@ -722,13 +722,7 @@ async def dump(
                                 )
                                 return points, next_offset
                             except Exception as e:
-                                if "Message too long" in str(e) and batch_size_limit > 100:
-                                    # Reduce batch size for gRPC message size issues
-                                    new_batch_size = batch_size_limit // 2
-                                    click.echo(f"⚠️ gRPC message too long, reducing batch size from {batch_size_limit} to {new_batch_size}")
-                                    if new_batch_size >= 100:
-                                        return await fetch_batch(batch_offset, new_batch_size)
-                                elif attempt < max_retries - 1:
+                                if attempt < max_retries - 1:
                                     click.echo(f"⚠️ Error fetching batch at offset {batch_offset} (attempt {attempt + 1}/{max_retries}): {e}")
                                     await asyncio.sleep(1)  # Wait before retry
                                     continue
@@ -772,7 +766,7 @@ async def dump(
                                 row = [point.id]
                                 
                                 if include_vectors:
-                                    row.extend(point.vector)
+                                    row.append(point.vector)
                                 
                                 if include_payload:
                                     row.append(json_dumps(point.payload) if point.payload else '')
