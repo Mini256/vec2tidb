@@ -8,6 +8,7 @@ from vec2tidb.commands.qdrant import (
     migrate as qdrant_migrate_impl,
     load_sample as qdrant_load_sample_impl,
     benchmark as qdrant_benchmark_impl,
+    dump_sync as qdrant_dump_impl,
     get_snapshot_uri,
 )
 
@@ -265,6 +266,65 @@ def qdrant_benchmark(
         batch_size_list=batch_size_list,
         table_prefix=table_prefix,
         cleanup_tables=cleanup_tables,
+    )
+
+
+# Subcommand: qdrant dump
+@qdrant_group.command(name="dump")
+@qdrant_connection_options
+@click.option(
+    "--output-file",
+    required=True,
+    help="Output CSV file path",
+)
+@click.option(
+    "--limit",
+    type=int,
+    help="Maximum number of records to export (default: all records)",
+)
+@click.option(
+    "--offset",
+    type=int,
+    help="Number of records to skip before starting export",
+)
+@click.option(
+    "--no-vectors",
+    is_flag=True,
+    help="Exclude vector data from export",
+)
+@click.option(
+    "--no-payload",
+    is_flag=True,
+    help="Exclude payload data from export",
+)
+@click.option(
+    "--batch-size",
+    default=100,
+    help="Batch size for processing (default: 100)",
+)
+def qdrant_dump(
+    qdrant_api_url: str,
+    qdrant_api_key: str,
+    qdrant_collection_name: str,
+    output_file: str,
+    limit: Optional[int],
+    offset: Optional[int],
+    no_vectors: bool,
+    no_payload: bool,
+    batch_size: int,
+):
+    """Export Qdrant collection data to CSV format."""
+
+    qdrant_dump_impl(
+        qdrant_api_url=qdrant_api_url,
+        qdrant_api_key=qdrant_api_key,
+        qdrant_collection_name=qdrant_collection_name,
+        output_file=output_file,
+        limit=limit,
+        offset=offset,
+        include_vectors=not no_vectors,
+        include_payload=not no_payload,
+        batch_size=batch_size,
     )
 
 

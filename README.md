@@ -133,6 +133,72 @@ vec2tidb qdrant load-sample \
 | `--dataset`                | Sample dataset to load: `midlib`, `qdrant-docs`, `prefix-cache`. Default: `midlib` (required) |
 | `--snapshot-uri`           | Custom snapshot URI (auto-determined from dataset if not provided)                              |
 
+#### Command: `qdrant dump`
+
+To export Qdrant collection data to CSV format.
+
+```bash
+vec2tidb qdrant dump \
+  --qdrant-api-url http://localhost:6333 \
+  --qdrant-collection-name test_collection \
+  --output-file data_export.csv
+```
+
+**Command Options**
+
+| Option                     | Description                                                                                      |
+|----------------------------|--------------------------------------------------------------------------------------------------|
+| `--qdrant-api-url`         | Qdrant API endpoint. Default: `http://localhost:6333`                                           |
+| `--qdrant-api-key`         | Qdrant API key (if authentication is enabled)                                                    |
+| `--qdrant-collection-name` | Name of the source Qdrant collection (required)                                                  |
+| `--output-file`            | Output CSV file path (required)                                                                  |
+| `--limit`                  | Maximum number of records to export (default: all records)                                      |
+| `--offset`                 | Number of records to skip before starting export                                                |
+| `--no-vectors`             | Exclude vector data from export (flag)                                                          |
+| `--no-payload`             | Exclude payload data from export (flag)                                                         |
+| `--batch-size`             | Batch size for processing (default: 100)                                                        |
+
+**Examples:**
+
+Export all data with vectors and payload:
+```bash
+vec2tidb qdrant dump \
+  --qdrant-collection-name my_collection \
+  --output-file full_export.csv
+```
+
+Export only IDs and vectors (no payload):
+```bash
+vec2tidb qdrant dump \
+  --qdrant-collection-name my_collection \
+  --output-file vectors_only.csv \
+  --no-payload
+```
+
+Export only IDs and payload (no vectors):
+```bash
+vec2tidb qdrant dump \
+  --qdrant-collection-name my_collection \
+  --output-file payload_only.csv \
+  --no-vectors
+```
+
+Export first 1000 records:
+```bash
+vec2tidb qdrant dump \
+  --qdrant-collection-name my_collection \
+  --output-file sample_export.csv \
+  --limit 1000
+```
+
+Export with custom batch size for large datasets:
+```bash
+vec2tidb qdrant dump \
+  --qdrant-collection-name my_collection \
+  --output-file large_export.csv \
+  --batch-size 500
+```
+
 #### Command: `qdrant benchmark`
 
 To run performance benchmarks with different configurations.

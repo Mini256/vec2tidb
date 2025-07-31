@@ -1,3 +1,4 @@
+import asyncio
 from typing import Optional
 
 import click
@@ -601,3 +602,167 @@ def benchmark(
 
     click.echo(f"   • For production use, consider your system's CPU cores and memory")
     click.echo(f"   • Monitor database connection limits when using many workers")
+
+
+async def dump(
+    qdrant_api_url: str,
+    qdrant_api_key: Optional[str],
+    qdrant_collection_name: str,
+    output_file: str,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+    include_vectors: bool = True,
+    include_payload: bool = True,
+    batch_size: int = 100,
+):
+    """Export Qdrant collection data to CSV format using batch processing."""
+    
+    import csv
+    import os
+    from qdrant_client import AsyncQdrantClient
+    from tqdm import tqdm
+    
+    # Initialize async Qdrant client
+    qdrant_client = AsyncQdrantClient(url=qdrant_api_url, api_key=qdrant_api_key)
+    
+    try:
+        # Check if collection exists
+        collection_exists = await qdrant_client.collection_exists(collection_name=qdrant_collection_name)
+        if not collection_exists:
+            raise click.UsageError(
+                f"Requested Qdrant collection '{qdrant_collection_name}' does not exist"
+            )
+
+        # Get collection info
+        collection_info = await qdrant_client.get_collection(
+            collection_name=qdrant_collection_name
+        )
+        vector_dimension = collection_info.config.params.vectors.size
+        vector_distance_metric = collection_info.config.params.vectors.distance.lower()
+        
+        # Get total count
+        count_result = await qdrant_client.count(collection_name=qdrant_collection_name)
+        total_count = count_result.count
+        if total_count == 0:
+            raise click.UsageError(
+                f"No records present in requested Qdrant collection '{qdrant_collection_name}'"
+            )
+        
+        # Set limit to total count if not specified
+        if limit is None:
+            limit = total_count
+        
+        actual_limit = min(limit, total_count)
+        
+        click.echo(f"📊 Exporting {actual_limit} records from collection '{qdrant_collection_name}'")
+        click.echo(f"📁 Output file: {output_file}")
+        click.echo(f"🔢 Vector dimension: {vector_dimension}")
+        click.echo(f"📏 Distance metric: {vector_distance_metric}")
+        click.echo(f"📋 Include vectors: {include_vectors}")
+        click.echo(f"📄 Include payload: {include_payload}")
+        click.echo(f"📦 Batch size: {batch_size}")
+        click.echo()
+        
+        # Create output directory if it doesn't exist
+        output_dir = os.path.dirname(output_file)
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+            click.echo(f"📁 Created output directory: {output_dir}")
+        
+        # Prepare CSV headers
+        headers = ['id']
+        if include_vectors:
+            headers.extend([f'vector_{i}' for i in range(vector_dimension)])
+        if include_payload:
+            headers.append('payload')
+        
+        # Open CSV file and write headers
+        with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(headers)
+            
+            # Calculate total batches
+            total_batches = (actual_limit + batch_size - 1) // batch_size
+            
+            # Create progress bar
+            with tqdm(total=actual_limit, desc="Exporting", unit="records") as pbar:
+                current_offset = offset or 0
+                records_exported = 0
+                
+                for batch_num in range(total_batches):
+                    # Calculate current batch size
+                    current_batch_size = min(batch_size, actual_limit - records_exported)
+                    
+                    # Fetch batch from Qdrant
+                    points, next_offset = await qdrant_client.scroll(
+                        collection_name=qdrant_collection_name,
+                        limit=current_batch_size,
+                        offset=current_offset,
+                        with_payload=include_payload,
+                        with_vectors=include_vectors,
+                    )
+                    
+                    if not points:
+                        break
+                    
+                    # Write batch to CSV
+                    for point in points:
+                        row = [point.id]
+                        
+                        if include_vectors:
+                            row.extend(point.vector)
+                        
+                        if include_payload:
+                            row.append(json.dumps(point.payload) if point.payload else '')
+                        
+                        writer.writerow(row)
+                    
+                    # Update progress
+                    records_exported += len(points)
+                    pbar.update(len(points))
+                    
+                    # Update offset for next batch
+                    current_offset = next_offset
+                    
+                    # Check if we've reached the limit
+                    if records_exported >= actual_limit:
+                        break
+        
+        # Get final file size
+        file_size = os.path.getsize(output_file)
+        file_size_mb = file_size / (1024 * 1024)
+        
+        click.echo()
+        click.echo(f"✅ Export completed successfully!")
+        click.echo(f"📊 Records exported: {records_exported}")
+        click.echo(f"📁 File size: {file_size_mb:.2f} MB")
+        click.echo(f"📄 Output file: {output_file}")
+        
+    finally:
+        # Close the async client
+        await qdrant_client.close()
+
+
+def dump_sync(
+    qdrant_api_url: str,
+    qdrant_api_key: Optional[str],
+    qdrant_collection_name: str,
+    output_file: str,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+    include_vectors: bool = True,
+    include_payload: bool = True,
+    batch_size: int = 100,
+):
+    """Synchronous wrapper for the async dump function."""
+    return asyncio.run(dump(
+        qdrant_api_url=qdrant_api_url,
+        qdrant_api_key=qdrant_api_key,
+        qdrant_collection_name=qdrant_collection_name,
+        output_file=output_file,
+        limit=limit,
+        offset=offset,
+        include_vectors=include_vectors,
+        include_payload=include_payload,
+        batch_size=batch_size,
+    ))
