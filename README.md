@@ -157,7 +157,6 @@ vec2tidb qdrant dump \
 | `--no-vectors`             | Exclude vector data from export                |
 | `--no-payload`             | Exclude payload data from export               |
 | `--batch-size`             | Batch size for processing (default: 500)       |
-| `--max-concurrent-batches` | Concurrent batch requests (default: 5)         |
 | `--buffer-size`            | File buffer size in bytes (default: 10000)     |
 
 
