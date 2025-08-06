@@ -1,24 +1,40 @@
 """CLI interface for vec2tidb."""
 
 import click
+import logging
 from typing import Optional
 from dotenv import load_dotenv
 
-from vec2tidb.commands.qdrant import (
-    migrate as qdrant_migrate_impl,
-    load_sample as qdrant_load_sample_impl,
-    benchmark as qdrant_benchmark_impl,
-    dump_sync as qdrant_dump_impl,
-    get_snapshot_uri,
-)
+from vec2tidb.commands.qdrant.migrate import migrate as qdrant_migrate_impl
+from vec2tidb.commands.qdrant.load_sample import load_sample as qdrant_load_sample_impl
+from vec2tidb.commands.qdrant.benchmark import benchmark as qdrant_benchmark_impl
+from vec2tidb.commands.qdrant.dump import dump_sync as qdrant_dump_impl
+from vec2tidb.commands.qdrant.common import get_snapshot_uri
+from vec2tidb.commands.tidb.batch_update import batch_update_impl
 
 
 load_dotenv()
 
 
+def setup_logging(verbose: bool = False):
+    """Setup logging configuration for CLI."""
+    # Configure logging to output to console
+    level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        handlers=[
+            logging.StreamHandler()
+        ]
+    )
+
+
 @click.group()
 def cli():
     """vec2tidb - A CLI tool for migrating data from third-party vector databases to TiDB."""
+    # Setup logging when CLI is invoked
+    setup_logging()
     pass
 
 
@@ -35,6 +51,13 @@ def tidb_connection_options(f):
 
 
 # Subcommands
+
+
+# Subcommand: tidb
+@cli.group(name="tidb")
+def tidb_group():
+    """TiDB database operations commands."""
+    pass
 
 
 # Subcommand: qdrant
@@ -332,6 +355,92 @@ def qdrant_dump(
         include_payload=not no_payload,
         batch_size=batch_size,
         buffer_size=buffer_size,
+    )
+
+
+# Subcommand: tidb batch-update
+@tidb_group.command(name="batch-update")
+@tidb_connection_options
+@click.option(
+    "--source-table",
+    required=True,
+    help="Source table name",
+)
+@click.option(
+    "--source-id-column",
+    required=True,
+    help="ID column name in source table",
+)
+@click.option(
+    "--target-table",
+    required=True,
+    help="Target table name",
+)
+@click.option(
+    "--target-id-column",
+    required=True,
+    help="ID column name in target table",
+)
+@click.option(
+    "--column-mapping",
+    required=True,
+    help="Column mapping in format 'target_col1:source_col1,target_col2:source_col2'",
+)
+@click.option(
+    "--batch-size",
+    default=5000,
+    help="Batch size for processing (default: 5000)",
+)
+@click.option(
+    "--compact",
+    is_flag=True,
+    help="Execute ALTER TABLE COMPACT on target table before updating",
+)
+@click.option(
+    "--verbose",
+    is_flag=True,
+    help="Enable verbose logging",
+)
+def tidb_batch_update(
+    tidb_database_url: str,
+    source_table: str,
+    source_id_column: str,
+    target_table: str,
+    target_id_column: str,
+    column_mapping: str,
+    batch_size: int,
+    compact: bool,
+    verbose: bool,
+):
+    """Batch update target table with data from source table based on ID matching."""
+    
+    # Parse column mapping
+    try:
+        mapping_dict = {}
+        for mapping in column_mapping.split(","):
+            if ":" not in mapping:
+                raise ValueError(f"Invalid column mapping format: {mapping}")
+            source_col, target_col = mapping.split(":", 1)
+            mapping_dict[source_col.strip()] = target_col.strip()
+        
+        if not mapping_dict:
+            raise ValueError("No valid column mappings provided")
+            
+    except Exception as e:
+        raise click.UsageError(f"Invalid column mapping format: {e}")
+    
+    # Setup logging based on verbose flag
+    setup_logging(verbose=verbose)
+    
+    batch_update_impl(
+        tidb_database_url=tidb_database_url,
+        source_table=source_table,
+        source_id_column=source_id_column,
+        target_table=target_table,
+        target_id_column=target_id_column,
+        column_mapping=mapping_dict,
+        batch_size=batch_size,
+        compact=compact,
     )
 
 

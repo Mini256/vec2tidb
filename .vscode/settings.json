@@ -1,6 +1,8 @@
 {
     "cSpell.words": [
-        "Qdrant"
+        "pbar",
+        "Qdrant",
+        "tiflash"
     ],
     "python.testing.pytestArgs": [
         "tests"

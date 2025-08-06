@@ -189,6 +189,41 @@ vec2tidb qdrant benchmark \
 | `--table-prefix`           | Prefix for benchmark table names. Default: `benchmark_test`                                     |
 
 
+### TiDB Commands
+
+To show all `tidb` subcommands, use the following command:
+
+```bash
+vec2tidb tidb --help
+```
+
+#### Command: `tidb batch-update`
+
+Batch update target table with data from source table based on ID matching. This command supports efficient batch processing with pagination.
+
+```bash
+vec2tidb tidb batch-update \
+  --source-table company_vectors \
+  --source-id-column id \
+  --target-table company_data \
+  --target-id-column vector_hash \
+  --column-mapping "vector:embedding" \
+  --batch-size 5000
+```
+
+**Command Options**
+
+| Option                     | Description                                                                                      |
+|----------------------------|--------------------------------------------------------------------------------------------------|
+| `--tidb-database-url`      | TiDB connection string. Default: `mysql+pymysql://root:@localhost:4000/test`                    |
+| `--source-table`           | Source table name (required)                                                                     |
+| `--source-id-column`       | ID column name in source table (required)                                                        |
+| `--target-table`           | Target table name (required)                                                                     |
+| `--target-id-column`       | ID column name in target table (required)                                                        |
+| `--column-mapping`         | Column mapping in format 'source_col1:target_col1,source_col2:target_col2' (required)          |
+| `--batch-size`             | Batch size for processing (default: 5000)                                                        |
+| `--compact`                | Execute `ALTER TABLE COMPACT` on target table before updating (flag)                              |
+
 ## Development
 
 For development setup and contribution guidelines, see [DEVELOPMENT.md](DEVELOPMENT.md).
