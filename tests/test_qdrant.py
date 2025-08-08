@@ -5,10 +5,15 @@ from unittest.mock import Mock, patch
 import pytest
 from qdrant_client.models import PointStruct
 
-from vec2tidb.commands.qdrant import (
-    migrate, create_vector_table, check_vector_table, insert_points, update_points,
-    get_snapshot_uri, load_sample, benchmark, drop_vector_table, dump_sync
+from vec2tidb.commands.qdrant.migrate import migrate
+from vec2tidb.commands.qdrant.common import (
+    create_vector_table, check_vector_table, insert_points, update_points,
+    drop_vector_table
 )
+from vec2tidb.commands.qdrant.common import get_snapshot_uri
+from vec2tidb.commands.qdrant.load_sample import load_sample
+from vec2tidb.commands.qdrant.benchmark import benchmark
+from vec2tidb.commands.qdrant.dump import dump_sync
 
 
 @patch("vec2tidb.commands.qdrant.QdrantClient")
@@ -1156,3 +1161,22 @@ def test_dump_without_vectors_and_payload():
     # This test would require a real Qdrant instance or complex mocking
     # For now, we'll just test that the function exists
     assert callable(dump_sync)
+
+
+def test_dump_custom_headers():
+    """Test that dump function accepts custom header parameters."""
+    from inspect import signature
+    
+    # Test that the dump_sync function signature includes custom header parameters
+    sig = signature(dump_sync)
+    params = sig.parameters
+    
+    # Verify that custom header parameters exist with correct defaults
+    assert 'id_header' in params
+    assert params['id_header'].default == "id"
+    
+    assert 'vector_header' in params
+    assert params['vector_header'].default == "vector"
+    
+    assert 'payload_header' in params
+    assert params['payload_header'].default == "payload"

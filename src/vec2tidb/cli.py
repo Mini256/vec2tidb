@@ -330,6 +330,21 @@ def qdrant_benchmark(
     default=10000,
     help="File buffer size in bytes (default: 10000)",
 )
+@click.option(
+    "--id-header",
+    default="id",
+    help="Custom header name for ID column (default: id)",
+)
+@click.option(
+    "--vector-header",
+    default="vector",
+    help="Custom header name for vector column (default: vector)",
+)
+@click.option(
+    "--payload-header",
+    default="payload",
+    help="Custom header name for payload column (default: payload)",
+)
 def qdrant_dump(
     qdrant_api_url: str,
     qdrant_api_key: str,
@@ -341,6 +356,9 @@ def qdrant_dump(
     no_payload: bool,
     batch_size: int,
     buffer_size: int,
+    id_header: str,
+    vector_header: str,
+    payload_header: str,
 ):
     """Export Qdrant collection data to CSV format with optimized performance."""
 
@@ -355,6 +373,9 @@ def qdrant_dump(
         include_payload=not no_payload,
         batch_size=batch_size,
         buffer_size=buffer_size,
+        id_header=id_header,
+        vector_header=vector_header,
+        payload_header=payload_header,
     )
 
 

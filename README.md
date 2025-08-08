@@ -147,17 +147,31 @@ vec2tidb qdrant dump \
   --output-file export.csv
 ```
 
+**Example with custom headers:**
+
+```bash
+vec2tidb qdrant dump \
+  --qdrant-collection-name my_collection \
+  --output-file export.csv
+```
+
 **Command Options**
 
 | Option                     | Description                                    |
 |----------------------------|------------------------------------------------|
 | `--qdrant-collection-name` | Qdrant collection name (required)              |
+| `--qdrant-api-url`         | Qdrant API endpoint. Default: `http://localhost:6333` |
+| `--qdrant-api-key`         | Qdrant API key (if authentication is enabled)  |
 | `--output-file`            | Output CSV file path (required)                |
 | `--limit`                  | Maximum number of records to export            |
+| `--offset`                 | Number of records to skip before starting export |
 | `--no-vectors`             | Exclude vector data from export                |
 | `--no-payload`             | Exclude payload data from export               |
 | `--batch-size`             | Batch size for processing (default: 500)       |
 | `--buffer-size`            | File buffer size in bytes (default: 10000)     |
+| `--id-header`              | Custom header name for ID column (default: `id`) |
+| `--vector-header`          | Custom header name for vector column (default: `vector`) |
+| `--payload-header`         | Custom header name for payload column (default: `payload`) |
 
 
 #### Command: `qdrant benchmark`

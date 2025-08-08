@@ -22,6 +22,9 @@ async def dump(
     include_payload: bool = True,
     batch_size: int = 500,
     buffer_size: int = 10000,
+    id_header: str = "id",
+    vector_header: str = "vector",
+    payload_header: str = "payload",
 ):
     """Export Qdrant collection data to CSV format using optimized batch processing."""
     
@@ -77,11 +80,11 @@ async def dump(
             click.echo(f"📁 Created output directory: {output_dir}")
         
         # Prepare CSV headers
-        headers = ['id']
+        headers = [id_header]
         if include_vectors:
-            headers.append('vector')
+            headers.append(vector_header)
         if include_payload:
-            headers.append('payload')
+            headers.append(payload_header)
         
         # Pre-compile JSON serialization for payload
         json_dumps = json.dumps
@@ -206,6 +209,9 @@ def dump_sync(
     include_payload: bool = True,
     batch_size: int = 500,
     buffer_size: int = 10000,
+    id_header: str = "id",
+    vector_header: str = "vector",
+    payload_header: str = "payload",
 ):
     """Synchronous wrapper for the async dump function."""
     return asyncio.run(dump(
@@ -219,4 +225,7 @@ def dump_sync(
         include_payload=include_payload,
         batch_size=batch_size,
         buffer_size=buffer_size,
+        id_header=id_header,
+        vector_header=vector_header,
+        payload_header=payload_header,
     )) 
