@@ -144,6 +144,9 @@ Export Qdrant collection data to CSV format with optimized performance.
 ```bash
 vec2tidb qdrant dump \
   --qdrant-collection-name my_collection \
+  --batch-size 200 \
+  --no-payload \
+  --buffer-size 50000 \
   --output-file export.csv
 ```
 
@@ -152,7 +155,10 @@ vec2tidb qdrant dump \
 ```bash
 vec2tidb qdrant dump \
   --qdrant-collection-name my_collection \
-  --output-file export.csv
+  --output-file export.csv \
+  --id-header "record_id" \
+  --vector-header "embedding" \
+  --payload-header "metadata"
 ```
 
 **Command Options**

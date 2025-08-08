@@ -19,7 +19,7 @@ load_dotenv()
 def setup_logging(verbose: bool = False):
     """Setup logging configuration for CLI."""
     # Configure logging to output to console
-    level = logging.DEBUG if verbose else logging.INFO
+    level = logging.DEBUG if verbose else logging.ERROR
     logging.basicConfig(
         level=level,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
